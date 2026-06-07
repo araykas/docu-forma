@@ -1,63 +1,71 @@
 /**
  * DocuForma AI — Backend Entry Point
- * Node.js + Express + Multer + Groq SDK
- * Dirancang sebagai Vercel Serverless Function (module.exports = app)
+ * Node.js + Express 4 + Multer 2 + Groq SDK
+ * Vercel Serverless Function: module.exports = app
  */
+
+'use strict'
 
 const express = require('express')
 const cors = require('cors')
 const multer = require('multer')
 const mammoth = require('mammoth')
 const pdfParse = require('pdf-parse')
-const Groq = require('groq-sdk')
 const FALLBACK_TEMPLATE = require('./fallback')
+
+// Groq SDK ships as ESM-only in newer versions — handle both export styles
+let GroqClass
+try {
+  const groqModule = require('groq-sdk')
+  // groq-sdk may export as { default: Groq } or directly as Groq
+  GroqClass = groqModule.default ?? groqModule
+} catch (e) {
+  console.error('[DocuForma] groq-sdk load error:', e.message)
+  GroqClass = null
+}
 
 // ─────────────────────────────────────────────
 // App Setup
 // ─────────────────────────────────────────────
 const app = express()
 
-// CORS — izinkan request dari domain frontend Vercel
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:4173',
-  process.env.FRONTEND_URL, // Set di Vercel env vars: https://docu-forma.vercel.app
-].filter(Boolean)
-
+// CORS — izinkan semua origin (frontend Vercel & localhost)
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Izinkan request tanpa origin (Postman, curl) dan origin yang terdaftar
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true)
-      } else {
-        callback(new Error(`CORS: origin '${origin}' tidak diizinkan`))
-      }
-    },
+    origin: true, // Reflect request origin — aman untuk deployment publik read-only API
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: false,
   })
 )
 
-app.use(express.json())
+// Handle preflight OPTIONS
+app.options('*', cors())
+
+app.use(express.json({ limit: '1mb' }))
 
 // ─────────────────────────────────────────────
-// Multer — Memory Storage (file tidak disimpan ke disk)
+// Multer — Memory Storage
 // ─────────────────────────────────────────────
+const ALLOWED_MIMETYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+])
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  fileFilter: (req, file, cb) => {
-    const allowed = [
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/pdf',
-      'image/png',
-      'image/jpeg',
-    ]
-    if (allowed.includes(file.mimetype)) {
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIMETYPES.has(file.mimetype)) {
       cb(null, true)
     } else {
-      cb(new Error('Format file tidak didukung. Gunakan .docx, .pdf, .png, atau .jpg.'))
+      cb(
+        Object.assign(new Error('Format file tidak didukung. Gunakan .docx, .pdf, .png, atau .jpg.'), {
+          code: 'INVALID_FILETYPE',
+        })
+      )
     }
   },
 })
@@ -74,35 +82,26 @@ ATURAN KETAT:
 1. HAPUS semua nama orang, nama institusi, tanggal spesifik, data angka, hasil penelitian, dan informasi personal.
 2. GANTI semua isi tersebut dengan placeholder dalam format [Deskripsi Singkat di Sini].
 3. PERTAHANKAN struktur heading, sub-heading, dan urutan BAB/bagian dokumen.
-4. DETEKSI jenis dokumen: 'academic' (makalah/laporan/skripsi), 'letter' (surat resmi), atau 'proposal'.
+4. DETEKSI jenis dokumen: "academic", "letter", atau "proposal".
 
-FORMAT RESPONS:
-Kembalikan HANYA JSON murni tanpa markdown, tanpa penjelasan, tanpa kode fence.
-Struktur JSON wajib:
+FORMAT RESPONS — kembalikan HANYA objek JSON ini, tanpa markdown, tanpa penjelasan:
 {
   "source": "groq",
-  "docType": "academic|letter|proposal",
-  "detectedTitle": "judul yang terdeteksi atau string kosong",
-  "detectedSupervisor": "nama dosen yang terdeteksi atau string kosong",
+  "docType": "academic",
+  "detectedTitle": "",
+  "detectedSupervisor": "",
   "sections": [
     {
       "type": "cover|preface|toc|chapter|bibliography|section",
-      "number": "I (hanya untuk chapter)",
-      "title": "JUDUL BAGIAN",
+      "number": "I",
+      "title": "JUDUL BAB",
       "heading": "heading jika bukan chapter",
-      "subsections": [
-        {
-          "number": "1.1",
-          "title": "Judul Sub-bagian",
-          "content": "[Placeholder isi sub-bagian ini]"
-        }
-      ],
-      "content": "[Placeholder konten jika tidak ada subsections]"
+      "subsections": [{ "number": "1.1", "title": "Sub-judul", "content": "[placeholder]" }],
+      "content": "[placeholder jika tidak ada subsections]",
+      "items": [{ "label": "Kata Pengantar", "page": "i", "indent": false }]
     }
   ]
-}
-
-PENTING: Jika dokumen tidak memiliki struktur BAB yang jelas, buat struktur minimal dengan bagian-bagian yang terdeteksi.`
+}`
 
 // ─────────────────────────────────────────────
 // Helper: Ekstrak teks dari file
@@ -110,199 +109,190 @@ PENTING: Jika dokumen tidak memiliki struktur BAB yang jelas, buat struktur mini
 async function extractText(file) {
   const { mimetype, buffer } = file
 
-  // .docx
   if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     const result = await mammoth.extractRawText({ buffer })
+    if (!result.value || result.value.trim().length < 10) {
+      throw new Error('File .docx kosong atau tidak dapat dibaca.')
+    }
     return { text: result.value, isImage: false }
   }
 
-  // .pdf
   if (mimetype === 'application/pdf') {
     const result = await pdfParse(buffer)
+    if (!result.text || result.text.trim().length < 10) {
+      throw new Error('File PDF kosong, terproteksi, atau hanya berisi gambar scan.')
+    }
     return { text: result.text, isImage: false }
   }
 
-  // gambar — konversi ke base64 untuk vision model
   if (mimetype === 'image/png' || mimetype === 'image/jpeg') {
     const base64 = buffer.toString('base64')
-    const mimePrefix = mimetype === 'image/png' ? 'image/png' : 'image/jpeg'
-    return { base64: `data:${mimePrefix};base64,${base64}`, isImage: true }
+    return {
+      base64: `data:${mimetype};base64,${base64}`,
+      isImage: true,
+    }
   }
 
-  throw new Error('Format file tidak dikenali')
+  throw new Error('Format file tidak dikenali.')
 }
 
 // ─────────────────────────────────────────────
 // Helper: Panggil Groq API
 // ─────────────────────────────────────────────
 async function analyzeWithGroq(extractedData) {
-  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+  if (!GroqClass) throw new Error('Groq SDK tidak tersedia.')
 
-  let messages
+  const groq = new GroqClass({ apiKey: process.env.GROQ_API_KEY })
 
   if (extractedData.isImage) {
-    // Gunakan vision model untuk gambar
-    messages = [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: GROQ_SYSTEM_PROMPT + '\n\nAnalisis gambar dokumen ini dan ekstrak strukturnya:',
-          },
-          {
-            type: 'image_url',
-            image_url: { url: extractedData.base64 },
-          },
-        ],
-      },
-    ]
-
     const completion = await groq.chat.completions.create({
       model: 'llama-3.2-11b-vision-preview',
-      messages,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: GROQ_SYSTEM_PROMPT + '\n\nAnalisis gambar dokumen ini:' },
+            { type: 'image_url', image_url: { url: extractedData.base64 } },
+          ],
+        },
+      ],
       max_tokens: 4096,
       temperature: 0.1,
     })
-
-    return completion.choices[0]?.message?.content || null
-  } else {
-    // Model teks untuk .docx dan .pdf
-    // Batasi teks agar tidak melebihi konteks model (~6000 kata)
-    const truncatedText = extractedData.text.slice(0, 12000)
-
-    messages = [
-      { role: 'system', content: GROQ_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: `Analisis dokumen berikut dan kembalikan struktur JSON-nya:\n\n${truncatedText}`,
-      },
-    ]
-
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-70b-versatile',
-      messages,
-      max_tokens: 4096,
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-    })
-
-    return completion.choices[0]?.message?.content || null
+    return completion.choices[0]?.message?.content ?? null
   }
+
+  // Teks — potong agar tidak overflow context window (±12k karakter ≈ 3k token)
+  const truncated = extractedData.text.slice(0, 12000)
+
+  const completion = await groq.chat.completions.create({
+    model: 'llama-3.1-70b-versatile',
+    messages: [
+      { role: 'system', content: GROQ_SYSTEM_PROMPT },
+      { role: 'user', content: `Analisis dokumen berikut dan kembalikan JSON strukturnya:\n\n${truncated}` },
+    ],
+    max_tokens: 4096,
+    temperature: 0.1,
+    response_format: { type: 'json_object' },
+  })
+  return completion.choices[0]?.message?.content ?? null
 }
 
 // ─────────────────────────────────────────────
-// Helper: Parse JSON dari respons Groq
+// Helper: Parse JSON respons Groq (robustly)
 // ─────────────────────────────────────────────
-function parseGroqResponse(rawText) {
-  if (!rawText) return null
+function parseGroqResponse(raw) {
+  if (!raw) return null
   try {
-    // Bersihkan kemungkinan markdown code fence
-    const cleaned = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/```\s*$/i, '')
+    const cleaned = raw
+      .replace(/^```json\s*/im, '')
+      .replace(/^```\s*/im, '')
+      .replace(/```\s*$/im, '')
       .trim()
-    return JSON.parse(cleaned)
+    const parsed = JSON.parse(cleaned)
+    // Validasi minimal
+    if (!Array.isArray(parsed.sections) || parsed.sections.length === 0) return null
+    return parsed
   } catch {
     return null
   }
 }
 
 // ─────────────────────────────────────────────
-// Route: Health check
+// Routes
 // ─────────────────────────────────────────────
-app.get('/api', (req, res) => {
-  res.json({ status: 'ok', message: 'DocuForma AI API is running' })
+app.get('/api', (_req, res) => {
+  res.json({ status: 'ok', version: '2.0', message: 'DocuForma AI API is running' })
 })
 
-// ─────────────────────────────────────────────
-// Route: POST /api/analyze
-// ─────────────────────────────────────────────
 app.post('/api/analyze', upload.single('file'), async (req, res) => {
+  // Multer error akan ditangani oleh error handler di bawah
   try {
-    // Validasi: file wajib ada
     if (!req.file) {
       return res.status(400).json({ error: 'Tidak ada file yang diunggah.' })
     }
 
-    // Validasi: GROQ_API_KEY harus tersedia
+    // Tanpa API key → langsung fallback (jangan 500)
     if (!process.env.GROQ_API_KEY) {
-      console.warn('[DocuForma] GROQ_API_KEY tidak ditemukan — menggunakan fallback template.')
-      return res.json({
+      console.warn('[DocuForma] GROQ_API_KEY tidak ditemukan — fallback diaktifkan.')
+      return res.status(200).json({
         ...FALLBACK_TEMPLATE,
-        warning: 'GROQ_API_KEY belum dikonfigurasi. Menggunakan template standar.',
+        warning: 'GROQ_API_KEY belum dikonfigurasi di server. Menggunakan template standar.',
       })
     }
 
-    // Step 1: Ekstrak teks dari file
-    let extractedData
+    // Ekstrak teks
+    let extracted
     try {
-      extractedData = await extractText(req.file)
-    } catch (extractErr) {
-      console.error('[DocuForma] Gagal ekstrak file:', extractErr.message)
-      return res.status(422).json({ error: `Gagal membaca file: ${extractErr.message}` })
+      extracted = await extractText(req.file)
+    } catch (err) {
+      console.warn('[DocuForma] Gagal ekstrak file:', err.message)
+      // File bermasalah tapi kita tetap beri template standar
+      return res.status(200).json({
+        ...FALLBACK_TEMPLATE,
+        warning: `Gagal membaca isi file: ${err.message}. Menggunakan template standar.`,
+      })
     }
 
-    // Step 2: Kirim ke Groq API
-    let groqRaw
+    // Panggil Groq
+    let raw
     try {
-      groqRaw = await analyzeWithGroq(extractedData)
-    } catch (groqErr) {
-      // Rate limit / timeout / network error → fallback
-      console.warn('[DocuForma] Groq API error:', groqErr.message)
-
-      const isRateLimit =
-        groqErr.status === 429 ||
-        groqErr.message?.toLowerCase().includes('rate limit') ||
-        groqErr.message?.toLowerCase().includes('quota')
-
-      return res.json({
+      raw = await analyzeWithGroq(extracted)
+    } catch (err) {
+      console.warn('[DocuForma] Groq error:', err.status, err.message)
+      const isRateLimit = err.status === 429 || /rate.?limit|quota|capacity/i.test(err.message ?? '')
+      return res.status(200).json({
         ...FALLBACK_TEMPLATE,
         warning: isRateLimit
-          ? 'Groq API rate limit tercapai. Menggunakan template standar.'
-          : 'Groq API tidak tersedia saat ini. Menggunakan template standar.',
+          ? 'Groq API sedang kelebihan beban (rate limit). Menggunakan template standar.'
+          : `Groq API tidak tersedia (${err.message ?? 'unknown'}). Menggunakan template standar.`,
       })
     }
 
-    // Step 3: Parse JSON dari Groq
-    const parsed = parseGroqResponse(groqRaw)
-
-    if (!parsed || !parsed.sections || !Array.isArray(parsed.sections)) {
-      // Groq mengembalikan respons tapi format salah → fallback
-      console.warn('[DocuForma] Respons Groq tidak valid, fallback diaktifkan.')
-      return res.json({
+    // Parse respons
+    const parsed = parseGroqResponse(raw)
+    if (!parsed) {
+      console.warn('[DocuForma] Respons Groq tidak valid — fallback.')
+      return res.status(200).json({
         ...FALLBACK_TEMPLATE,
         warning: 'Respons AI tidak dapat diproses. Menggunakan template standar.',
       })
     }
 
-    // Step 4: Sukses — kirim hasil
-    return res.json(parsed)
+    return res.status(200).json(parsed)
   } catch (err) {
-    console.error('[DocuForma] Unhandled error:', err)
-    // Last resort fallback — server tidak boleh crash
-    return res.json({
+    // Absolute last resort — TIDAK BOLEH 500
+    console.error('[DocuForma] Unhandled error di /api/analyze:', err)
+    return res.status(200).json({
       ...FALLBACK_TEMPLATE,
-      warning: 'Terjadi kesalahan tak terduga. Menggunakan template standar.',
+      warning: 'Terjadi kesalahan tak terduga di server. Menggunakan template standar.',
     })
   }
 })
 
 // ─────────────────────────────────────────────
-// Error handler Multer
+// Global error handler (Multer errors, dsb)
 // ─────────────────────────────────────────────
-app.use((err, req, res, next) => {
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  console.error('[DocuForma] Express error handler:', err.message)
+
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'Ukuran file melebihi batas 5MB.' })
-    }
-    return res.status(400).json({ error: `Upload error: ${err.message}` })
+    const msg = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Ukuran file melebihi batas 5MB.'
+      : `Upload error: ${err.message}`
+    return res.status(400).json({ error: msg })
   }
-  if (err.message) {
+
+  if (err.code === 'INVALID_FILETYPE') {
     return res.status(400).json({ error: err.message })
   }
-  next(err)
+
+  // Fallback untuk error lain yang lolos
+  return res.status(200).json({
+    ...FALLBACK_TEMPLATE,
+    warning: 'Terjadi kesalahan di server. Menggunakan template standar.',
+  })
 })
 
 // ─────────────────────────────────────────────
