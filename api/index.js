@@ -166,7 +166,7 @@ async function analyzeWithGroq(extractedData) {
   const truncated = extractedData.text.slice(0, 12000)
 
   const completion = await groq.chat.completions.create({
-    model: 'llama-3.1-70b-versatile',
+    model: 'llama-3.3-70b-versatile',
     messages: [
       { role: 'system', content: GROQ_SYSTEM_PROMPT },
       { role: 'user', content: `Analisis dokumen berikut dan kembalikan JSON strukturnya:\n\n${truncated}` },
