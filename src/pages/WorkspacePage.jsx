@@ -19,10 +19,10 @@ const DOC_TYPES = [
   { id: 'proposal', label: 'Proposal Penelitian' },
 ]
 
-export default function WorkspacePage({ file, onBack }) {
-  const [docType, setDocType] = useState('academic')
-  const [title, setTitle] = useState('')
-  const [supervisor, setSupervisor] = useState('')
+export default function WorkspacePage({ file, analysisResult, analysisError, onBack }) {
+  const [docType, setDocType] = useState(analysisResult?.docType || 'academic')
+  const [title, setTitle] = useState(analysisResult?.detectedTitle || '')
+  const [supervisor, setSupervisor] = useState(analysisResult?.detectedSupervisor || '')
   const [font, setFont] = useState('Times New Roman')
   const [fontSize, setFontSize] = useState('12pt')
   const [isGenerating, setIsGenerating] = useState(false)
@@ -56,6 +56,27 @@ export default function WorkspacePage({ file, onBack }) {
           <span style={{ color: '#6B7280' }}>
             {(file.size / 1024).toFixed(1)} KB
           </span>
+          {analysisResult?.source === 'groq' && (
+            <span
+              className="ml-auto px-2 py-0.5 rounded-full text-xs font-medium"
+              style={{ backgroundColor: '#DBEAFE', color: '#1D4ED8' }}
+            >
+              ✦ Dianalisis oleh Groq AI
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Fallback / warning banner */}
+      {(analysisError || analysisResult?.warning) && (
+        <div
+          className="px-6 py-2 text-xs flex items-center gap-2 border-b"
+          style={{ backgroundColor: '#FEF9C3', borderColor: '#FDE68A', color: '#92400E' }}
+        >
+          <Info size={13} className="flex-shrink-0" />
+          {analysisError
+            ? `Tidak dapat terhubung ke AI: ${analysisError}. Menggunakan template standar.`
+            : analysisResult.warning}
         </div>
       )}
 
@@ -296,6 +317,7 @@ export default function WorkspacePage({ file, onBack }) {
               supervisorName={supervisor}
               font={`${font}, serif`}
               fontSize={fontSize}
+              analysisData={analysisResult}
             />
           </div>
         </main>
