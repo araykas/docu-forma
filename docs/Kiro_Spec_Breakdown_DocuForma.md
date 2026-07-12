@@ -49,27 +49,29 @@ Kiro punya 3 lapisan:
 
 ---
 
-### KELOMPOK C — Baca pedoman .docx (Fase 2, direvisi jadi 2 spec + koreksi penting)
+### KELOMPOK C — Baca pedoman .docx (Fase 2, direvisi v2: buang klasifikasi berbasis word count)
 
-**⚠️ Koreksi dari versi sebelumnya:** file `.docx` **tidak selalu** boleh dibaca langsung dari XML-nya. Kalau `.docx` itu isinya teks naratif ("margin harus 4cm...") — persis kayak PDF, cuma beda kontainer — baca XML-nya akan salah, karena yang kebaca cuma setting Word dokumen itu sendiri (bisa jadi cuma default 2.54cm), bukan aturan yang dideskripsikan. Baca PRD bagian 3.2 (sudah direvisi ke v5) sebelum mulai spec ini.
+**⚠️ Koreksi kedua:** versi sebelumnya (spec C1 = klasifikasi "template vs naratif" pakai hitung kata) **terbukti rapuh** — pedoman padat/poin-poin ("font=TNR, margin 3-3-3-3") tetap butuh AI walau kata dikit, jadi bisa salah rute ke jalur baca-XML. Solusinya: **hapus langkah klasifikasi itu sepenuhnya**. Semua `.docx` sekarang diperlakukan sama seperti `.pdf` — teks selalu dikirim ke AI. Baca XML tetap ada, tapi cuma jadi fallback SETELAH AI, bukan jalur alternatif di depan. Baca PRD bagian 3.2 & 3.4 (sudah direvisi ke v6) sebelum mulai.
 
-**Spec C1 — Deteksi jenis .docx: template siap pakai vs pedoman naratif**
-- Baca: PRD bagian 3.2 (tabel yang sudah direvisi)
-- Deskripsi: "Buat modul yang menerima buffer .docx, extract teks polos pakai library mammoth, hitung jumlah kata naratif di luar heading/placeholder pendek. Kalau di bawah ambang (mis. <150 kata) → tandai sebagai 'template'. Kalau di atas ambang → tandai sebagai 'naratif'. Modul ini HANYA mengklasifikasikan, belum mengekstrak aturan."
-- Test: coba dengan .docx yang isinya cuma judul+placeholder kosong → harus ke-tag 'template'. Coba dengan .docx yang isinya paragraf penjelasan panjang (mis. copy-paste isi BAB V dari PDF UNISBANK ke Word) → harus ke-tag 'naratif'.
+**Spec C1 — Ekstraksi teks dari .docx (untuk pipeline AI)**
+- Baca: PRD bagian 3.2 (tabel v6)
+- Deskripsi: "Buat modul yang menerima buffer .docx, extract teks polos pakai library mammoth. TIDAK ADA logika klasifikasi/threshold di sini — modul ini cuma mengubah .docx jadi teks polos, lalu teks itu diperlakukan identik dengan hasil ekstraksi PDF (dikirim ke pipeline AI di Kelompok D)."
+- Test: upload .docx apapun (baik yang berisi banyak prosa maupun yang cuma poin-poin singkat), pastikan teksnya berhasil di-extract dan muncul di log.
 
-**Spec C2 — Baca metadata .docx (khusus jalur "template")**
-- Baca: PRD bagian 3.2 (baris .docx template), bagian 3.4 (skema JSON)
-- Deskripsi: "Untuk file yang ke-tag 'template' di Spec C1, buat modul baca properti .docx langsung dari XML internal (margin, font, ukuran font, spasi) TANPA AI. Field yang tidak ada di properti dasar .docx diberi detected:false + default."
-- Test: upload .docx template kosong yang kamu tahu setting-nya, cek hasil JSON sesuai isi file aslinya.
+**Spec C2 — Baca metadata XML .docx sebagai fallback pelengkap (jalan SETELAH AI)**
+- Baca: PRD bagian 3.2 (bagian "Peran baca metadata XML"), bagian 3.4 (field `source` yang baru)
+- Deskripsi: "Buat modul baca properti .docx langsung dari XML internal (margin, font, ukuran font, spasi). Modul ini dipanggil SETELAH hasil AI dari Kelompok D didapat — HANYA untuk field yang AI kembalikan sebagai detected:false. Kalau XML punya nilai untuk field itu, isi value-nya dan tandai source:'docx_property_fallback'. Field yang XML juga tidak punya nilainya, tetap detected:false dengan default seperti biasa."
+- Test: upload .docx yang isinya cuma placeholder kosong (nyaris tanpa teks aturan) → sebagian besar field AI-nya detected:false, cek apakah fallback XML berhasil ngisi beberapa di antaranya dengan source yang benar.
 
-**Catatan penting untuk file yang ke-tag 'naratif' di Spec C1:** file ini **tidak** dapat spec baru sendiri — dia langsung dilempar ke pipeline Kelompok D (spec D2 dst.) yang sama persis dengan PDF, cuma sumber teksnya dari hasil extract mammoth, bukan dari unpdf. Makanya di Kelompok D nanti, pastikan input pipeline-nya digeneralisasi jadi "terima teks polos dari sumber manapun", bukan cuma PDF.
+**Catatan penting untuk Kelompok E (Review) nanti:** field dengan `source: "docx_property_fallback"` harus ditampilkan dengan badge/warna berbeda dari hasil `ai_extraction` biasa — supaya user tahu itu cuma "tebakan dari setting file", bukan aturan eksplisit yang ketemu di teks pedoman.
 
 ---
 
 ### KELOMPOK D — Ekstraksi teks + AI (dulu Fase 3, PALING BERISIKO — dipecah jadi 7 spec kecil)
 
-**Catatan:** kelompok ini sekarang jadi pipeline **generik** — dipakai untuk teks dari PDF (Spec D1) **maupun** teks dari .docx naratif (hasil Spec C1). Spec D2 dan seterusnya harus menerima input berupa string teks polos, tidak peduli asalnya, supaya tidak ada kode dobel.
+**Catatan:** kelompok ini sekarang jadi pipeline **generik** — dipakai untuk teks dari PDF (Spec D1) **maupun** teks dari .docx (hasil Spec C1). Spec D2 dan seterusnya harus menerima input berupa string teks polos, tidak peduli asalnya, supaya tidak ada kode dobel.
+
+**Urutan alur khusus untuk sumber `.docx`:** Spec C1 (extract teks) → Spec D2-D6 (pipeline AI, sama seperti PDF) → **baru setelah itu** Spec C2 (fallback XML, cuma isi field yang masih `detected:false`). Untuk sumber `.pdf`, urutannya tetap D1-D6 seperti biasa tanpa langkah fallback tambahan.
 
 **Spec D1 — Ekstraksi teks PDF saja (tanpa AI)**
 - Baca: PRD bagian 3.2 (baris PDF)

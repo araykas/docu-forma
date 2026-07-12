@@ -1,8 +1,8 @@
-# Product Requirements Document (PRD) — v5
+# Product Requirements Document (PRD) — v6
 **Nama Proyek:** DocuForma AI
 **Platform:** Web Application (Next.js, deploy ke Vercel)
 **Konteks:** Proyek UAS / tugas mata kuliah, dikerjakan dalam satu semester
-**Revisi:** v5 — mengoreksi asumsi keliru bahwa file `.docx` selalu bisa dibaca langsung dari properti XML-nya. Pedoman kampus yang didistribusikan sebagai `.docx` seringkali berupa **teks naratif** (persis seperti PDF, cuma beda kontainer), bukan template siap pakai — kasus ini harus melalui pipeline AI yang sama dengan PDF, bukan baca XML mentah-mentah (lihat Bagian 3.2). Revisi sebelumnya (v4) menambahkan aturan scoping ekstraksi AI untuk dokumen dengan spesifikasi ganda, Skenario error untuk kegagalan tak tertangani, dan poin keandalan operasional di Bagian 10.
+**Revisi:** v6 — mencabut langkah klasifikasi "template vs naratif" berbasis jumlah kata (v5) karena terbukti rapuh: pedoman padat/berbentuk poin bisa punya kata sedikit tapi tetap berisi aturan eksplisit yang butuh AI, sehingga salah rute ke jalur baca-XML. Sekarang **semua** `.docx` diperlakukan sama seperti `.pdf` — teks selalu diekstrak dan dikirim ke AI. Baca metadata XML `.docx` tetap ada, tapi perannya jadi fallback pelengkap untuk field yang tidak terdeteksi AI, ditandai eksplisit sebagai "saran otomatis" bukan hasil eksplisit (lihat Bagian 3.2 & 3.4).
 
 ---
 
@@ -47,18 +47,19 @@ Mahasiswa tingkat akhir, dosen, dan peneliti yang membutuhkan standardisasi form
 
 ### 3.2. Alur Pemrosesan Dokumen
 
-**Revisi v5 — koreksi penting:** Versi sebelumnya (v3/v4) mengasumsikan file `.docx` selalu berupa template yang setting Word-nya sendiri (margin, font di halaman) sudah mencerminkan aturan yang benar. Ini **tidak selalu benar** — banyak pedoman kampus didistribusikan sebagai `.docx` yang isinya justru **teks narasi** ("margin kiri harus 4cm, font Times New Roman...") persis seperti isi PDF, cuma beda kontainer file. Kalau file semacam ini dibaca lewat XML properti Word-nya, yang terbaca adalah setting dokumen itu sendiri (mis. margin default 2.54cm karena pembuat pedoman tidak sengaja set), **bukan** aturan yang dideskripsikan di teksnya — dan ini salah secara *silent* (tidak ada error, `detected: true` tapi nilainya keliru).
+**Revisi v6 — koreksi lanjutan:** v5 memperkenalkan langkah "deteksi jenis .docx" (template vs naratif) berdasarkan jumlah kata naratif. Pendekatan ini **terbukti rapuh**: pedoman yang ditulis padat/berbentuk poin-poin (mis. "font = Times New Roman, margin 3-3-3-3, ukuran 11") tetap berisi aturan eksplisit yang butuh AI untuk dibaca, walau jumlah katanya sedikit. Threshold angka berapa pun akan selalu punya kasus yang salah rute — masalahnya bukan di angkanya, tapi di premisnya: **jumlah kata bukan sinyal yang valid** untuk menentukan apakah sebuah dokumen "template" atau "naratif".
 
-Jadi keputusan "butuh AI atau tidak" **bukan** ditentukan oleh ekstensi file, tapi oleh **jenis konten**-nya:
+**Perbaikan v6 — hilangkan percabangan, satukan pipeline:**
 
-| Jenis Dokumen Sumber | Ciri | Cara Ekstraksi | Butuh AI? |
-|---|---|---|---|
-| `.docx` — **template siap pakai** (setting halaman Word sudah dikonfigurasi benar oleh kampus, teks penjelasan minim) | Sedikit paragraf naratif, dominan placeholder/struktur | Baca metadata langsung dari XML (margin, font, spasi sebagai properti eksplisit) | Tidak — cukup parsing biasa |
-| `.docx` — **pedoman naratif** (isinya kalimat penjelasan aturan, setting Word dokumen itu sendiri tidak relevan) | Banyak paragraf penjelasan, pola kalimat serupa PDF pedoman | Extract teks (mis. pakai `mammoth`), lalu perlakukan **identik dengan alur PDF** di bawah — kirim ke AI | Ya |
-| `.pdf` (berbasis teks, bukan hasil scan) | — | Ekstrak teks, kirim ke AI untuk (a) klasifikasi relevansi dan (b) ekstraksi aturan format ke JSON terstruktur | Ya |
-| `.pdf` hasil scan / gambar | — | **Di luar scope MVP** (lihat Bagian 9) | Ya, dan jauh lebih kompleks (perlu OCR + vision) |
+| Jenis Dokumen Sumber | Cara Ekstraksi | Butuh AI? |
+|---|---|---|
+| `.docx` (semua jenis, tanpa kecuali) | Extract teks (mis. pakai `mammoth`) -> kirim ke pipeline AI yang **identik** dengan `.pdf` (klasifikasi relevansi + ekstraksi aturan ke JSON) | Ya |
+| `.pdf` (berbasis teks, bukan hasil scan) | Ekstrak teks, kirim ke AI untuk (a) klasifikasi relevansi dan (b) ekstraksi aturan format ke JSON terstruktur | Ya |
+| `.pdf` hasil scan / gambar | **Di luar scope MVP** (lihat Bagian 9) | Ya, dan jauh lebih kompleks (perlu OCR + vision) |
 
-**Cara menentukan jenis `.docx` (template vs naratif):** extract teks polos dari `.docx`, hitung jumlah kata di luar heading/placeholder pendek. Kalau di bawah ambang tertentu (mis. <150 kata naratif) → perlakukan sebagai template, baca XML. Kalau di atas ambang → perlakukan sebagai naratif, masuk ke pipeline AI yang sama dengan PDF. Pipeline AI (ekstraksi + validasi + scoping di Bagian 3.3) harus ditulis generik menerima **teks polos** sebagai input, tidak peduli asalnya dari PDF atau `.docx`, supaya kode tidak dobel.
+**Peran baca metadata XML `.docx` (fallback, bukan jalur utama):** setelah AI selesai memproses teks dari `.docx`, untuk **setiap field yang AI kembalikan sebagai `detected: false`**, sistem boleh mencoba membaca nilai yang sesuai dari properti XML dokumen `.docx` tersebut (margin, font, spasi) sebagai **saran tambahan** -- BUKAN dianggap sebagai hasil terdeteksi yang setara dengan ekstraksi AI. Nilai dari fallback ini harus ditandai berbeda di skema data (lihat Bagian 3.4, field `source`) dan ditampilkan di halaman Review dengan indikator visual berbeda (mis. "saran dari setting file, mohon verifikasi manual") -- supaya user tidak salah percaya ini sama validnya dengan aturan yang eksplisit disebutkan di teks pedoman.
+
+Kenapa fallback ini tetap berguna meski tidak otoritatif: kalau dokumen `.docx` memang benar-benar template kosong (tidak ada teks aturan sama sekali, AI akan menandai hampir semua field `detected: false`), maka setting XML dokumen itu adalah petunjuk terbaik yang tersedia -- lebih baik ditawarkan sebagai saran yang bisa diterima/ditolak user, daripada dibiarkan kosong total atau (lebih buruk) dipaksakan sebagai fakta.
 
 ### 3.3. Peran AI (Dipersempit & Dipertegas)
 
@@ -110,6 +111,20 @@ Satu kali pemanggilan API mengembalikan JSON dengan struktur berikut:
 ```
 
 Field dengan `"detected": false` otomatis diisi nilai default dan ditandai di halaman review agar pengguna tahu mana yang perlu diperiksa ulang.
+
+**Tambahan v6 — field `source` untuk hasil fallback:** setiap object di dalam `rules` boleh punya field opsional `source` dengan nilai salah satu dari:
+- `"ai_extraction"` (default kalau tidak ditulis) — nilai berasal dari AI membaca teks pedoman secara eksplisit. Ini yang paling bisa dipercaya.
+- `"docx_property_fallback"` — nilai berasal dari properti XML dokumen `.docx` sumber, dipakai HANYA ketika AI menandai field itu `detected: false`. Field ini tetap harus dianggap **belum terverifikasi** di halaman Review (badge berbeda dari hasil `ai_extraction`, meski secara teknis field ini bisa saja bernilai `detected: true` untuk keperluan tampilan — yang penting badge visualnya membedakan sumbernya secara jelas ke user).
+
+Contoh field dengan fallback:
+```json
+"font_size": { "value": 11, "detected": true, "source": "docx_property_fallback" }
+```
+Ini beda perlakuan visual di Review dari:
+```json
+"font_size": { "value": 12, "detected": true, "source": "ai_extraction" }
+```
+meski keduanya `detected: true` — yang kedua eksplisit disebut di teks pedoman, yang pertama cuma "kebetulan" begitu setting file `.docx`-nya.
 
 ---
 
