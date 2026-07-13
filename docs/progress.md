@@ -13,28 +13,28 @@
 
 ## Kelompok B — Upload
 
-- [ ] **B1** — UI upload saja (drag-and-drop, tampilkan nama file, tanpa validasi server)
-- [ ] **B2** — Validasi tipe & ukuran file server-side (magic bytes, maks 10MB)
-- [ ] **B3** — Deteksi PDF terkunci password
+- [x] **B1** — UI upload saja (drag-and-drop, tampilkan nama file, tanpa validasi server)
+- [x] **B2** — Validasi tipe & ukuran file server-side (magic bytes, maks 10MB)
+- [x] **B3** — Deteksi PDF terkunci password
 
 ---
 
 ## Kelompok C — Baca pedoman .docx
 
-- [ ] **C1** — Deteksi jenis .docx: template siap pakai vs pedoman naratif
-- [ ] **C2** — Baca metadata .docx (khusus jalur "template", tanpa AI)
+- [x] **C1** — Ekstraksi teks dari .docx pakai mammoth (tanpa klasifikasi/threshold), teks diperlakukan identik dengan hasil ekstraksi PDF untuk pipeline AI
+- [x] **C2** — Baca metadata XML .docx sebagai fallback pelengkap (jalan SETELAH AI, hanya isi field yang `detected:false`, ditandai `source: "docx_property_fallback"`)
 
 ---
 
 ## Kelompok D — Ekstraksi teks + AI
 
-- [ ] **D1** — Ekstraksi teks PDF saja (tanpa AI, deteksi PDF scan)
-- [ ] **D2** — Wiring dasar ke Gemini API (komunikasi & parse JSON)
-- [ ] **D3** — Scoping prompt: dokumen dengan spesifikasi ganda ⚠️ *wajib test PDF UNISBANK sebelum lanjut*
-- [ ] **D4** — Validasi & sanitasi hasil JSON dari AI
-- [ ] **D5** — Error handling fail-fast (timeout AbortController, pesan error + tombol coba lagi)
-- [ ] **D6** — Penanganan dokumen tidak relevan (is_relevant:false)
-- [ ] **D7** — Notice AI pihak ketiga di halaman upload
+- [x] **D1** — Ekstraksi teks PDF saja (tanpa AI, deteksi PDF scan)
+- [x] **D2** — Wiring dasar ke Gemini API (komunikasi & parse JSON)
+- [x] **D3** — Scoping prompt: dokumen dengan spesifikasi ganda ⚠️ *wajib test PDF UNISBANK sebelum lanjut*
+- [x] **D4** — Validasi & sanitasi hasil JSON dari AI
+- [x] **D5** — Error handling fail-fast (timeout AbortController, pesan error + tombol coba lagi)
+- [x] **D6** — Penanganan dokumen tidak relevan (is_relevant:false)
+- [x] **D7** — Notice AI pihak ketiga di halaman upload
 
 ---
 
