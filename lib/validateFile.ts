@@ -60,19 +60,50 @@ function matchesSignature(buf: Uint8Array, sig: number[]): boolean {
 }
 
 /**
+ * Batas ukuran hasil decompress seluruh isi .docx (anti zip-bomb).
+ * PRD Bagian 10 poin 2.
+ *
+ * Sebuah file .docx 10 MB yang sah jarang memiliki konten yang setelah
+ * di-decompress melampaui 50 MB. Zip-bomb bisa mencapai rasio ribuan:1.
+ * Batas 50 MB ini aman untuk dokumen nyata tapi memblokir zip-bomb.
+ */
+const MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024 // 50 MB
+
+/**
  * Open the ZIP archive in-memory and verify it contains the two entries that
  * are mandatory in every valid .docx file:
  *   - [Content_Types].xml  (root-level Office Open XML manifest)
  *   - word/document.xml    (the actual document body)
  *
- * Returns true only when both entries are present.
+ * Also guards against zip-bombs by measuring total decompressed size.
+ * PRD Bagian 10 poin 2: batas ukuran hasil decompress.
+ *
+ * Returns true only when both entries are present AND total decompressed size
+ * is within MAX_DECOMPRESSED_BYTES.
  */
-async function isValidDocx(buffer: ArrayBuffer): Promise<boolean> {
+async function isValidDocx(buffer: ArrayBuffer): Promise<boolean | 'zip_bomb'> {
   try {
     const zip = await JSZip.loadAsync(buffer)
     const hasContentTypes = zip.file('[Content_Types].xml') !== null
     const hasWordDocument = zip.file('word/document.xml') !== null
-    return hasContentTypes && hasWordDocument
+
+    if (!hasContentTypes || !hasWordDocument) return false
+
+    // Anti zip-bomb: hitung total ukuran semua entry setelah decompress
+    let totalDecompressed = 0
+    const fileEntries = Object.values(zip.files).filter((f) => !f.dir)
+    for (const entry of fileEntries) {
+      // _data.uncompressedSize tersedia tanpa perlu decompress penuh
+      const uncompressedSize: number =
+        (entry as unknown as { _data?: { uncompressedSize?: number } })
+          ._data?.uncompressedSize ?? 0
+      totalDecompressed += uncompressedSize
+      if (totalDecompressed > MAX_DECOMPRESSED_BYTES) {
+        return 'zip_bomb'
+      }
+    }
+
+    return true
   } catch {
     // Corrupt or unreadable ZIP
     return false
@@ -101,8 +132,9 @@ async function isValidDocx(buffer: ArrayBuffer): Promise<boolean> {
 export async function isPdfPasswordProtected(buffer: ArrayBuffer): Promise<boolean> {
   try {
     const { getDocument } = await getResolvedPDFJS()
-    // Pass a Uint8Array copy so pdf.js owns its own memory reference
-    const loadingTask = getDocument({ data: new Uint8Array(buffer) })
+    // slice(0) makes an independent copy — PDF.js will detach the underlying
+    // memory it receives, so we must never hand it the caller's original buffer.
+    const loadingTask = getDocument({ data: new Uint8Array(buffer.slice(0)) })
     const doc = await loadingTask.promise
     // Clean up the pdf.js worker resources immediately
     await doc.destroy()
@@ -149,8 +181,16 @@ export async function validateFileBuffer(
   }
 
   if (matchesSignature(header, ZIP_MAGIC)) {
-    // 3. ZIP confirmed — now verify it is actually a .docx, not just any ZIP
+    // 3. ZIP confirmed — now verify it is actually a .docx, not just any ZIP,
+    //    and that its decompressed size is within safe bounds (anti zip-bomb).
     const docxOk = await isValidDocx(buffer)
+    if (docxOk === 'zip_bomb') {
+      return {
+        valid: false,
+        error:
+          'Gagal: file tidak dapat diproses karena ukurannya terlalu besar setelah dibuka.',
+      }
+    }
     if (!docxOk) {
       return {
         valid: false,

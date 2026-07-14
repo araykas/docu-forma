@@ -40,18 +40,18 @@
 
 ## Kelompok E — Halaman Review
 
-- [ ] **E1** — Layout review dengan data dummy (4 kelompok field, badge terdeteksi/default)
-- [ ] **E2** — Panel pratinjau visual (mockup A4, update real-time, toggle bagian awal/utama)
-- [ ] **E3** — Kontrol tambahan (toggle isi bab, tombol Upload ulang, tombol Download dummy)
-- [ ] **E4** — Hubungkan ke data ekstraksi asli (ganti dummy dengan hasil C/D)
+- [x] **E1** — Layout review dengan data dummy (4 kelompok field, badge terdeteksi/default)
+- [x] **E2** — Panel pratinjau visual (mockup A4, update real-time, toggle bagian awal/utama)
+- [x] **E3** — Kontrol tambahan (toggle isi bab, tombol Upload ulang, tombol Download dummy)
+- [x] **E4** — Hubungkan ke data ekstraksi asli (ganti dummy dengan hasil C/D)
 
 ---
 
 ## Kelompok F — Generator .docx
 
-- [ ] **F1** — Generator dasar (margin, font, kertas, struktur bab generik)
-- [ ] **F2** — Section break & penomoran halaman (romawi bagian awal, arab bagian utama)
-- [ ] **F3** — Isi bab & hubungkan tombol Download ke endpoint
+- [x] **F1** — Generator dasar (margin, font, kertas, struktur bab generik)
+- [x] **F2** — Section break & penomoran halaman (romawi bagian awal, arab bagian utama)
+- [x] **F3** — Isi bab & hubungkan tombol Download ke endpoint
 
 ---
 
@@ -63,7 +63,7 @@
 
 ## Kelompok H — Wiring akhir & Deploy
 
-- [ ] **H1** — Wiring end-to-end (upload → proses → review → download, loading state tiap tahap)
+- [x] **H1** — Wiring end-to-end (upload → proses → review → download, loading state tiap tahap)
 - [ ] **H2** — Uji dengan dokumen kompleks *(testing manual — PDF Pedoman TA FTI UNISBANK)*
 - [ ] **H3** — Persiapan deploy (.env.example, API key dari env var, fitur out-of-scope tidak ter-expose)
 

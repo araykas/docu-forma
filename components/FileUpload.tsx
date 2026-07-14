@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useRef, useCallback, DragEvent, ChangeEvent } from 'react'
+import { useRouter } from 'next/navigation'
+import { EXTRACTION_STORAGE_KEY } from '@/lib/extractionToGroups'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -10,7 +12,12 @@ type UploadState =
   | { status: 'idle' }
   | { status: 'dragging' }
   | { status: 'selected'; file: File }
-  | { status: 'validating'; file: File }
+  /** Spec D5: pemrosesan aktif — label langkah ditampilkan ke user. */
+  | { status: 'processing'; file: File; step: string }
+  /** Spec D5: error / timeout — tampilkan pesan + tombol coba lagi. */
+  | { status: 'failed'; file: File; errorMsg: string }
+  /** Spec D6: dokumen tidak relevan — minta user upload dokumen yang sesuai. */
+  | { status: 'irrelevant'; file: File }
 
 type ToastVariant = 'error' | 'success'
 
@@ -29,6 +36,13 @@ const ACCEPTED_MIME = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ]
+
+/**
+ * Spec D5 — timeout AbortController di frontend.
+ * Batalkan request ke server setelah batas ini untuk menghindari
+ * spinner tanpa batas waktu. PRD Bagian 6 Skenario 7 & Bagian 10 poin 9.
+ */
+const FETCH_TIMEOUT_MS = 27_000
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -162,9 +176,8 @@ function ToastItem({
 // FileUpload
 // ---------------------------------------------------------------------------
 
-let toastCounter = 0
-
 export default function FileUpload() {
+  const router = useRouter()
   const [state, setState] = useState<UploadState>({ status: 'idle' })
   const [toasts, setToasts] = useState<Toast[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
@@ -172,12 +185,9 @@ export default function FileUpload() {
   // -- toast helpers --
 
   const addToast = useCallback((message: string, variant: ToastVariant) => {
-    const id = ++toastCounter
+    const id = Date.now()
     setToasts((prev) => [...prev, { id, message, variant }])
-    // Auto-dismiss after 6 s
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id))
-    }, 6000)
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000)
   }, [])
 
   const dismissToast = useCallback((id: number) => {
@@ -223,55 +233,132 @@ export default function FileUpload() {
     setState({ status: 'idle' })
   }, [])
 
-  // -- server validation (Spec B2) --
+  // -- server validation + full pipeline (Spec B2 + D5 + H1) --
 
-  const handleGenerate = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation()
-      if (state.status !== 'selected') return
+  const runPipeline = useCallback(
+    async (file: File) => {
+      // Step 1: validasi file di client (tipe & ukuran dasar)
+      setState({ status: 'processing', file, step: 'Memvalidasi file…' })
 
-      const file = state.file
-      setState({ status: 'validating', file })
+      // Spec D5: AbortController dengan timeout ±27 detik
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+      // Step 2: kirim ke server untuk validasi + ekstraksi + AI
+      // — semua terjadi dalam satu request ke /api/upload.
+      // Kita simulasikan progress label setelah server mulai merespons.
+      let stepTimer: ReturnType<typeof setTimeout> | null = null
 
       try {
         const form = new FormData()
         form.append('file', file)
 
+        setState({ status: 'processing', file, step: 'Mengirim file ke server…' })
+
+        // Setelah 1.5 detik tanpa respons, asumsi sudah melewati validasi → ke AI
+        stepTimer = setTimeout(() => {
+          setState((prev) =>
+            prev.status === 'processing'
+              ? { ...prev, step: 'Mengekstrak teks dokumen…' }
+              : prev,
+          )
+        }, 1500)
+
+        // Setelah 4 detik tanpa respons, asumsi sudah melewati ekstraksi → AI
+        const stepTimer2 = setTimeout(() => {
+          setState((prev) =>
+            prev.status === 'processing'
+              ? { ...prev, step: 'Menganalisis aturan format dengan AI…' }
+              : prev,
+          )
+        }, 4000)
+
         const res = await fetch('/api/upload', {
           method: 'POST',
           body: form,
+          signal: controller.signal,
         })
 
-        const data = (await res.json()) as { ok: boolean; error?: string; mimeType?: string }
+        clearTimeout(timeoutId)
+        clearTimeout(stepTimer)
+        clearTimeout(stepTimer2)
+
+        setState({ status: 'processing', file, step: 'Memproses hasil AI…' })
+
+        const data = (await res.json()) as {
+          ok: boolean
+          error?: string
+          code?: string
+          mimeType?: string
+          extraction?: unknown
+        }
 
         if (!data.ok) {
-          // Restore selected state so the user can swap the file
-          setState({ status: 'selected', file })
-          addToast(
-            data.error ?? 'Gagal: Harap unggah file PDF/DOCX dengan ukuran maksimal 10 MB.',
-            'error',
-          )
+          // Spec D6: dokumen tidak relevan → state khusus, bukan state 'failed'
+          if (data.code === 'not_relevant') {
+            setState({ status: 'irrelevant', file })
+            return
+          }
+          setState({ status: 'failed', file, errorMsg: data.error ?? 'Gagal memproses dokumen.' })
           return
         }
 
-        // Validation passed — restore selected state for now
-        // (further processing added in later specs)
-        setState({ status: 'selected', file })
-        addToast('File valid. Siap diproses.', 'success')
-      } catch {
-        setState({ status: 'selected', file })
-        addToast('Terjadi kesalahan jaringan. Silakan coba lagi.', 'error')
+        // H1: simpan hasil ekstraksi ke sessionStorage lalu navigasi ke /review
+        if (data.extraction) {
+          try {
+            sessionStorage.setItem(EXTRACTION_STORAGE_KEY, JSON.stringify(data.extraction))
+          } catch {
+            // sessionStorage penuh atau tidak tersedia — lanjut saja tanpa crash
+          }
+        }
+
+        setState({ status: 'processing', file, step: 'Membuka halaman review…' })
+        router.push('/review')
+      } catch (err: unknown) {
+        clearTimeout(timeoutId)
+        if (stepTimer) clearTimeout(stepTimer)
+
+        // Spec D5: bedakan timeout (AbortError) dari error jaringan lain
+        const isTimeout =
+          err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')
+
+        const errorMsg = isTimeout
+          ? 'Proses memakan waktu terlalu lama. Silakan coba lagi.'
+          : 'Terjadi kesalahan jaringan. Silakan coba lagi.'
+
+        setState({ status: 'failed', file, errorMsg })
       }
     },
-    [state, addToast],
+    [router],
+  )
+  const handleGenerate = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (state.status !== 'selected' && state.status !== 'failed') return
+      runPipeline(state.file)
+    },
+    [state, runPipeline],
+  )
+
+  const handleRetry = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (state.status !== 'failed') return
+      runPipeline(state.file)
+    },
+    [state, runPipeline],
   )
 
   // -- derived flags --
 
   const isDragging = state.status === 'dragging'
-  const isSelected = state.status === 'selected' || state.status === 'validating'
-  const isValidating = state.status === 'validating'
+  const isSelected = state.status === 'selected' || state.status === 'processing' || state.status === 'failed' || state.status === 'irrelevant'
+  const isProcessing = state.status === 'processing'
+  const isFailed = state.status === 'failed'
+  const isIrrelevant = state.status === 'irrelevant'
   const currentFile = isSelected ? (state as { file: File }).file : null
+  const processingStep = state.status === 'processing' ? state.step : null
+  const errorMsg = state.status === 'failed' ? state.errorMsg : null
 
   // ---------------------------------------------------------------------------
   // Render
@@ -318,7 +405,7 @@ export default function FileUpload() {
         />
 
         {isSelected && currentFile ? (
-          /* ── Selected / Validating state ── */
+          /* ── Selected / Processing / Failed state ── */
           <div className="flex flex-col items-center gap-3 w-full">
             {getFileIcon(currentFile.name)}
             <div className="flex flex-col items-center gap-1">
@@ -328,8 +415,34 @@ export default function FileUpload() {
               <p className="text-xs text-zinc-500">{formatBytes(currentFile.size)}</p>
             </div>
 
-            {/* Actions — hidden while validating */}
-            {!isValidating && (
+            {/* Spec D5: error state — pesan jelas + tombol coba lagi */}
+            {isFailed && errorMsg && (
+              <div
+                role="alert"
+                className="w-full max-w-xs rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-center"
+              >
+                <p className="text-sm text-red-700 font-medium leading-snug">{errorMsg}</p>
+              </div>
+            )}
+
+            {/* Spec D6: dokumen tidak relevan — pesan sesuai PRD Skenario 3 */}
+            {isIrrelevant && (
+              <div
+                role="alert"
+                className="w-full max-w-xs rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-center"
+              >
+                <p className="text-sm text-amber-800 font-semibold leading-snug mb-1">
+                  Dokumen tidak relevan
+                </p>
+                <p className="text-xs text-amber-700 leading-snug">
+                  Dokumen ini tampaknya bukan pedoman format penulisan. Silakan unggah dokumen
+                  pedoman yang sesuai.
+                </p>
+              </div>
+            )}
+
+            {/* Actions — hidden while processing or irrelevant (irrelevant needs a fresh file) */}
+            {!isProcessing && !isIrrelevant && (
               <div className="flex items-center gap-3 mt-1">
                 <button
                   type="button"
@@ -357,50 +470,93 @@ export default function FileUpload() {
               </div>
             )}
 
-            {/* Generate / loading button */}
-            <button
-              type="button"
-              disabled={isValidating}
-              aria-busy={isValidating}
-              onClick={handleGenerate}
-              className={[
-                'mt-3 w-full max-w-xs rounded-xl px-6 py-2.5 text-sm font-semibold text-white shadow-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2',
-                'transition-colors',
-                isValidating
-                  ? 'bg-indigo-400 cursor-not-allowed'
-                  : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800',
-              ].join(' ')}
-            >
-              {isValidating ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg
-                    aria-hidden="true"
-                    className="animate-spin h-4 w-4 text-white"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Memvalidasi…
-                </span>
-              ) : (
-                'Generate Template'
-              )}
-            </button>
+            {/* Spec D5: processing → spinner dengan label langkah */}
+            {isProcessing && processingStep && (
+              <p
+                aria-live="polite"
+                className="text-xs text-indigo-600 font-medium mt-1"
+              >
+                {processingStep}
+              </p>
+            )}
+
+            {/* Primary action button:
+                - Normal: "Generate Template"
+                - Processing: spinner + label langkah (disabled)
+                - Failed: "Coba Lagi" (Spec D5 PRD Skenario 7) */}
+            {/* Spec D6: dokumen tidak relevan — tombol utama upload dokumen lain */}
+            {isIrrelevant ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  inputRef.current?.click()
+                }}
+                className={[
+                  'mt-3 w-full max-w-xs rounded-xl px-6 py-2.5 text-sm font-semibold text-white shadow-sm',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2',
+                  'transition-colors bg-amber-600 hover:bg-amber-700 active:bg-amber-800',
+                ].join(' ')}
+              >
+                Upload Dokumen Lain
+              </button>
+            ) : isFailed ? (
+              <button
+                type="button"
+                onClick={handleRetry}
+                className={[
+                  'mt-3 w-full max-w-xs rounded-xl px-6 py-2.5 text-sm font-semibold text-white shadow-sm',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2',
+                  'transition-colors bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800',
+                ].join(' ')}
+              >
+                Coba Lagi
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={isProcessing}
+                aria-busy={isProcessing}
+                onClick={handleGenerate}
+                className={[
+                  'mt-3 w-full max-w-xs rounded-xl px-6 py-2.5 text-sm font-semibold text-white shadow-sm',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2',
+                  'transition-colors',
+                  isProcessing
+                    ? 'bg-indigo-400 cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800',
+                ].join(' ')}
+              >
+                {isProcessing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg
+                      aria-hidden="true"
+                      className="animate-spin h-4 w-4 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
+                    </svg>
+                    Memproses…
+                  </span>
+                ) : (
+                  'Generate Template'
+                )}
+              </button>
+            )}
           </div>
         ) : isDragging ? (
           /* ── Dragging state ── */
