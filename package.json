@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "docx": "9.0.2",
     "jszip": "3.10.1",
     "mammoth": "^1.8.0",
     "next": "16.2.10",
