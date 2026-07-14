@@ -68,6 +68,18 @@ export interface GeminiCallError {
 }
 
 // ---------------------------------------------------------------------------
+// Pesan error user-facing (PRD Bagian 6 Skenario 6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pesan yang ditampilkan ke user untuk semua kegagalan komunikasi dengan
+ * Gemini API: 503 overloaded, 429 rate limit, timeout, error jaringan, dll.
+ * Detail teknis di-log ke server console — tidak pernah dikirim ke client.
+ */
+const AI_UNAVAILABLE_MSG =
+  'Mohon maaf, layanan AI kami sedang penuh atau mengalami gangguan. Silakan coba lagi dalam beberapa menit.'
+
+// ---------------------------------------------------------------------------
 // Prompt
 // ---------------------------------------------------------------------------
 
@@ -192,10 +204,12 @@ export async function callGemini(
   // Pastikan API key tersedia
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
+    // Log detail teknis ke server — JANGAN kirim ke client
+    console.error('[callGemini] GEMINI_API_KEY tidak ditemukan di environment variables.')
     return {
       type: 'error',
       code: 'missing_key',
-      error: 'GEMINI_API_KEY tidak ditemukan di environment variables.',
+      error: 'Terjadi kesalahan konfigurasi pada server. Silakan coba lagi nanti.',
     }
   }
 
@@ -230,21 +244,23 @@ export async function callGemini(
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Network error'
-    console.error('[callGemini] fetch error:', message)
+    // Log detail teknis ke server — JANGAN kirim ke client (PRD §6 Skenario 6)
+    console.error('[callGemini] fetch error (network):', message)
     return {
       type: 'error',
       code: 'api_error',
-      error: `Gagal menghubungi Gemini API: ${message}`,
+      error: AI_UNAVAILABLE_MSG,
     }
   }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '(no body)')
+    // Log detail teknis ke server — JANGAN kirim ke client (PRD §6 Skenario 6)
     console.error(`[callGemini] HTTP ${response.status}:`, body)
     return {
       type: 'error',
       code: 'api_error',
-      error: `Gemini API mengembalikan status ${response.status}.`,
+      error: AI_UNAVAILABLE_MSG,
     }
   }
 
@@ -253,10 +269,12 @@ export async function callGemini(
   try {
     envelope = await response.json()
   } catch {
+    // Log detail teknis ke server — JANGAN kirim ke client (PRD §6 Skenario 6)
+    console.error('[callGemini] Failed to parse Gemini envelope as JSON')
     return {
       type: 'error',
       code: 'parse_error',
-      error: 'Respons Gemini API tidak bisa di-parse sebagai JSON.',
+      error: AI_UNAVAILABLE_MSG,
     }
   }
 
@@ -267,7 +285,7 @@ export async function callGemini(
     return {
       type: 'error',
       code: 'parse_error',
-      error: 'Struktur respons Gemini API tidak dikenali.',
+      error: AI_UNAVAILABLE_MSG,
     }
   }
 
@@ -283,7 +301,7 @@ export async function callGemini(
     return {
       type: 'error',
       code: 'parse_error',
-      error: 'JSON dari Gemini tidak bisa di-parse. Coba unggah ulang dokumen.',
+      error: AI_UNAVAILABLE_MSG,
     }
   }
 

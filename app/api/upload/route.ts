@@ -130,7 +130,9 @@ export async function POST(request: NextRequest) {
 
       // If Gemini returned an error, surface it to the client
       if ('type' in geminiResult) {
-        return Response.json({ ok: false, error: geminiResult.error }, { status: 502 })
+        // missing_key = server misconfiguration, not a transient AI issue
+        const status = geminiResult.code === 'missing_key' ? 500 : 502
+        return Response.json({ ok: false, error: geminiResult.error }, { status })
       }
 
       // Spec D6: dokumen tidak relevan — hentikan alur sebelum masuk Review.
@@ -193,7 +195,9 @@ export async function POST(request: NextRequest) {
       console.log('=== [DIAG] end Gemini raw result (docx) ===')
 
       if ('type' in geminiResult) {
-        return Response.json({ ok: false, error: geminiResult.error }, { status: 502 })
+        // missing_key = server misconfiguration, not a transient AI issue
+        const status = geminiResult.code === 'missing_key' ? 500 : 502
+        return Response.json({ ok: false, error: geminiResult.error }, { status })
       }
 
       // Spec D6: dokumen tidak relevan — hentikan alur sebelum masuk Review.
