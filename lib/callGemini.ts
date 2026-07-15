@@ -25,6 +25,12 @@
 export interface RuleField {
   value: string | number | boolean | null
   detected: boolean
+  /**
+   * Kutipan verbatim dari teks dokumen yang menjadi dasar deteksi field ini.
+   * Diisi oleh Gemini hanya jika detected:true dan AI yakin dengan kalimat sumbernya.
+   * null jika detected:false atau AI tidak yakin persis kalimat sumbernya.
+   */
+  source_quote?: string | null
   /** Opsional — diisi Spec C2 untuk fallback XML, bukan oleh callGemini */
   source?: 'ai_extraction' | 'docx_property_fallback'
 }
@@ -102,24 +108,46 @@ The JSON must match this exact schema:
   "is_relevant": boolean,
   "confidence_note": string,
   "rules": {
-    "paper_size":              { "value": string|null,  "detected": boolean },
-    "margin_left_cm":          { "value": number|null,  "detected": boolean },
-    "margin_right_cm":         { "value": number|null,  "detected": boolean },
-    "margin_top_cm":           { "value": number|null,  "detected": boolean },
-    "margin_bottom_cm":        { "value": number|null,  "detected": boolean },
-    "font_family":             { "value": string|null,  "detected": boolean },
-    "font_size":               { "value": number|null,  "detected": boolean },
-    "line_spacing":            { "value": number|null,  "detected": boolean },
-    "page_number_position":    { "value": string|null,  "detected": boolean },
-    "front_matter_numbering":  { "value": string|null,  "detected": boolean },
-    "main_body_numbering":     { "value": string|null,  "detected": boolean },
-    "chapter_title_case":      { "value": string|null,  "detected": boolean },
-    "chapter_title_align":     { "value": string|null,  "detected": boolean },
-    "chapter_number_format":   { "value": string|null,  "detected": boolean },
-    "subchapter_number_format":{ "value": string|null,  "detected": boolean }
+    "paper_size":              { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "margin_left_cm":          { "value": number|null,  "detected": boolean, "source_quote": string|null },
+    "margin_right_cm":         { "value": number|null,  "detected": boolean, "source_quote": string|null },
+    "margin_top_cm":           { "value": number|null,  "detected": boolean, "source_quote": string|null },
+    "margin_bottom_cm":        { "value": number|null,  "detected": boolean, "source_quote": string|null },
+    "font_family":             { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "font_size":               { "value": number|null,  "detected": boolean, "source_quote": string|null },
+    "line_spacing":            { "value": number|null,  "detected": boolean, "source_quote": string|null },
+    "page_number_position":    { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "front_matter_numbering":  { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "main_body_numbering":     { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "chapter_title_case":      { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "chapter_title_align":     { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "chapter_number_format":   { "value": string|null,  "detected": boolean, "source_quote": string|null },
+    "subchapter_number_format":{ "value": string|null,  "detected": boolean, "source_quote": string|null }
   },
   "missing_fields": [array of field names where detected is false]
 }
+
+== SOURCE QUOTE RULE (MANDATORY) ==
+For EVERY field where "detected": true, you MUST also fill "source_quote" with a verbatim
+excerpt (10–25 words) copied directly from the document text — the exact sentence or phrase
+that is the basis for your detection. Do NOT paraphrase. Do NOT rewrite. Copy the exact
+wording from the document.
+
+Rules for source_quote:
+- "detected": true  → "source_quote" must be a verbatim string (10–25 words from the document).
+- "detected": false → "source_quote" must be null.
+- If you are NOT sure which exact sentence the value came from, set "source_quote": null.
+  NEVER fabricate or invent a quote. An empty/null source_quote is always safer than a
+  made-up one.
+- The quote must come from the same section that satisfies the SCOPING RULE below
+  (main-report section only, not Naskah Publikasi or Lampiran).
+
+Example of a correct source_quote:
+  "margin_left_cm": { "value": 4, "detected": true,
+    "source_quote": "Margin kiri dan atas masing-masing berjarak 4 cm dari tepi kertas" }
+
+Example of an incorrect source_quote (paraphrase — NEVER do this):
+  "source_quote": "Left margin is 4 centimeters"   ← WRONG if document says something different
 
 == RELEVANCE RULE ==
 Set "is_relevant": true only if the document contains academic writing format guidelines
@@ -311,6 +339,14 @@ export async function callGemini(
   console.log('[callGemini] Berhasil. is_relevant:', result.is_relevant,
     '| missing_fields:', result.missing_fields)
 
+  // Log source_quote per field untuk verifikasi (Spec D3+)
+  const rulesMap = result.rules as unknown as Record<string, RuleField>
+  for (const [key, field] of Object.entries(rulesMap)) {
+    if (field?.detected) {
+      console.log(`[callGemini] source_quote [${key}]:`, field.source_quote ?? '(kosong)')
+    }
+  }
+
   return result
 }
 
@@ -349,14 +385,39 @@ function extractTextFromEnvelope(envelope: unknown): string | null {
 }
 
 /**
+ * Sanitasi nilai source_quote dari satu field:
+ * - Jika bukan string, kembalikan null (toleransi field hilang/tipe salah dari AI)
+ * - Jika string kosong, kembalikan null
+ * - Jika panjang > MAX_SOURCE_QUOTE_LENGTH, truncate (Spec D4)
+ *
+ * Tidak ada validasi whitelist — source_quote adalah teks bebas.
+ */
+const MAX_SOURCE_QUOTE_LENGTH = 300
+
+function sanitizeSourceQuote(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return null
+  return trimmed.length > MAX_SOURCE_QUOTE_LENGTH
+    ? trimmed.slice(0, MAX_SOURCE_QUOTE_LENGTH)
+    : trimmed
+}
+
+/**
  * Tandai setiap field rule yang detected:true dengan source:'ai_extraction'.
  * Field dengan detected:false dibiarkan tanpa source (akan diisi oleh Spec C2 jika relevan).
+ * Spec D4: sanitasi source_quote — pastikan tipe string|null, truncate > 300 char.
  */
 function tagAiSource(result: GeminiExtractionResult): GeminiExtractionResult {
   const rules = result.rules as unknown as Record<string, RuleField>
   for (const key of Object.keys(rules)) {
     const field = rules[key]
-    if (field && field.detected) {
+    if (!field) continue
+
+    // Spec D4: sanitasi source_quote pada semua field (detected true maupun false)
+    field.source_quote = sanitizeSourceQuote(field.source_quote)
+
+    if (field.detected) {
       field.source = 'ai_extraction'
     }
   }

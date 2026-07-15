@@ -74,6 +74,12 @@ interface ReviewField {
   step?: number
   /** Deskripsi singkat opsi yang valid (untuk placeholder/tooltip) */
   hint?: string
+  /**
+   * Kutipan verbatim dari dokumen pedoman yang menjadi dasar deteksi field ini.
+   * Hanya diisi saat source === 'ai_extraction' dan AI yakin dengan kalimat sumbernya.
+   * null / undefined jika sumber bukan ai_extraction atau kutipan tidak tersedia.
+   */
+  source_quote?: string | null
 }
 
 interface FieldGroup {
@@ -360,6 +366,11 @@ function FieldRow({
         {field.source === 'default' && (
           <p className="mt-0.5 text-[11px] text-amber-600 leading-snug">
             Tidak terdeteksi dari dokumen — nilai default dipakai
+          </p>
+        )}
+        {field.source === 'ai_extraction' && field.source_quote && (
+          <p className="mt-0.5 text-[11px] text-zinc-400 italic leading-snug">
+            💬 &ldquo;{field.source_quote}&rdquo;
           </p>
         )}
       </div>

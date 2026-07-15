@@ -44,6 +44,11 @@ export interface ReviewField {
   max?: number
   step?: number
   hint?: string
+  /**
+   * Kutipan verbatim dari dokumen pedoman yang menjadi dasar deteksi.
+   * Diisi hanya saat source === 'ai_extraction' dan AI yakin dengan kalimat sumbernya.
+   */
+  source_quote?: string | null
 }
 
 export interface FieldGroup {
@@ -81,7 +86,7 @@ const DEFAULTS: Record<string, string> = {
 function resolveField(
   field: RuleField | undefined,
   defaultValue: string,
-): { value: string; source: FieldSource } {
+): { value: string; source: FieldSource; source_quote?: string | null } {
   if (!field || !field.detected || field.value === null || field.value === undefined) {
     return { value: defaultValue, source: 'default' }
   }
@@ -89,7 +94,12 @@ function resolveField(
     field.source === 'docx_property_fallback'
       ? 'docx_property_fallback'
       : 'ai_extraction'
-  return { value: String(field.value), source }
+  return {
+    value: String(field.value),
+    source,
+    // Hanya teruskan source_quote untuk ai_extraction — field lain tidak relevan
+    source_quote: source === 'ai_extraction' ? (field.source_quote ?? null) : null,
+  }
 }
 
 // ---------------------------------------------------------------------------
