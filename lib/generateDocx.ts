@@ -47,6 +47,7 @@ import {
 /**
  * Subset dari skema PRD Bagian 3.4 yang relevan untuk generator ini.
  * F2 menambahkan: page_number_position, front_matter_numbering, main_body_numbering.
+ * Field ke-16: font_color — warna tinta (default "000000" = hitam).
  */
 export interface DocFormatRules {
   paper_size: string                 // 'A4' | 'Letter' | 'Legal'
@@ -57,6 +58,12 @@ export interface DocFormatRules {
   font_family: string                // e.g. 'Times New Roman'
   font_size: number                  // dalam pt
   line_spacing: number               // faktor: 1, 1.5, 2, dll.
+  /**
+   * Warna tinta teks dalam format hex OOXML 6-digit (tanpa '#').
+   * Default: '000000' (hitam). Sesuai Pedoman TA FTI UNISBANK Bab V:
+   * "Warna tinta hitam".
+   */
+  font_color: string
   chapter_title_case: string         // 'uppercase' | 'capitalize' | 'normal'
   chapter_title_align: string        // 'left' | 'center' | 'right' | 'justify'
   chapter_number_format: string      // 'roman' | 'arabic' | 'none'
@@ -243,6 +250,12 @@ interface ParagraphDefaults {
   fontSizeHalfPt: number
   spacing: ReturnType<typeof resolveSpacing>
   alignment: (typeof AlignmentType)[keyof typeof AlignmentType]
+  /**
+   * Warna teks dalam format hex OOXML 6-digit (tanpa '#').
+   * Default: '000000' (hitam). Wajib di-set eksplisit pada setiap TextRun
+   * untuk mencegah style Heading Word yang defaultnya biru.
+   */
+  fontColor: string
 }
 
 // ---------------------------------------------------------------------------
@@ -254,7 +267,7 @@ function makeBodyParagraph(text: string, opts: ParagraphDefaults): Paragraph {
     spacing: opts.spacing,
     alignment: opts.alignment,
     children: [
-      new TextRun({ text, font: opts.fontFamily, size: opts.fontSizeHalfPt }),
+      new TextRun({ text, font: opts.fontFamily, size: opts.fontSizeHalfPt, color: opts.fontColor }),
     ],
   })
 }
@@ -270,6 +283,8 @@ function makeChapterHeading(label: string, opts: ParagraphDefaults): Paragraph {
         font: opts.fontFamily,
         size: Math.round(opts.fontSizeHalfPt * 1.2),
         bold: true,
+        // Eksplisit override warna — Word default Heading 1 style = biru (#2E74B5)
+        color: opts.fontColor,
       }),
     ],
   })
@@ -281,7 +296,14 @@ function makeSubchapterHeading(label: string, opts: ParagraphDefaults): Paragrap
     spacing: { ...opts.spacing, before: Math.round(opts.fontSizeHalfPt * 10) },
     alignment: AlignmentType.LEFT,
     children: [
-      new TextRun({ text: label, font: opts.fontFamily, size: opts.fontSizeHalfPt, bold: true }),
+      new TextRun({
+        text: label,
+        font: opts.fontFamily,
+        size: opts.fontSizeHalfPt,
+        bold: true,
+        // Eksplisit override warna — Word default Heading 2 style = biru (#2E74B5)
+        color: opts.fontColor,
+      }),
     ],
   })
 }
@@ -289,7 +311,7 @@ function makeSubchapterHeading(label: string, opts: ParagraphDefaults): Paragrap
 function makeEmptyParagraph(opts: ParagraphDefaults): Paragraph {
   return new Paragraph({
     spacing: opts.spacing,
-    children: [new TextRun({ text: '', font: opts.fontFamily, size: opts.fontSizeHalfPt })],
+    children: [new TextRun({ text: '', font: opts.fontFamily, size: opts.fontSizeHalfPt, color: opts.fontColor })],
   })
 }
 
@@ -318,6 +340,8 @@ function buildFrontMatterChildren(
             font: defaults.fontFamily,
             size: Math.round(defaults.fontSizeHalfPt * 1.2),
             bold: true,
+            // Eksplisit override warna agar tidak mengambil default theme Word
+            color: defaults.fontColor,
           }),
         ],
       }),
@@ -405,6 +429,7 @@ function makePageNumberFooter(
   position: string,
   fontFamily: string,
   fontSizeHalfPt: number,
+  fontColor: string,
 ): Footer {
   const alignment = resolveFooterAlignment(position)
   return new Footer({
@@ -416,6 +441,7 @@ function makePageNumberFooter(
             children: [PageNumber.CURRENT],
             font: fontFamily,
             size: fontSizeHalfPt,
+            color: fontColor,
           }),
         ],
       }),
@@ -427,6 +453,7 @@ function makePageNumberHeader(
   position: string,
   fontFamily: string,
   fontSizeHalfPt: number,
+  fontColor: string,
 ): Header {
   const alignment = resolveFooterAlignment(position)
   return new Header({
@@ -438,6 +465,7 @@ function makePageNumberHeader(
             children: [PageNumber.CURRENT],
             font: fontFamily,
             size: fontSizeHalfPt,
+            color: fontColor,
           }),
         ],
       }),
@@ -482,11 +510,27 @@ export async function generateDocx(
   const spacing = resolveSpacing(rules.line_spacing, safeFontSize)
   const fontFamily = rules.font_family || 'Times New Roman'
 
+  // Resolve font_color: nama warna → hex OOXML.
+  // Default '000000' (hitam) sesuai Pedoman TA FTI UNISBANK Bab V.
+  const COLOR_NAME_TO_HEX: Record<string, string> = {
+    black: '000000',
+    white: 'FFFFFF',
+    red:   'FF0000',
+    blue:  '0000FF',
+    green: '008000',
+  }
+  const rawColor = (rules.font_color ?? 'black').toLowerCase().trim()
+  // Terima nama warna ATAU hex 6-digit langsung (tanpa '#')
+  const fontColor =
+    COLOR_NAME_TO_HEX[rawColor] ??
+    (/^[0-9a-f]{6}$/i.test(rawColor) ? rawColor.toUpperCase() : '000000')
+
   const defaults: ParagraphDefaults = {
     fontFamily,
     fontSizeHalfPt,
     spacing,
     alignment: AlignmentType.LEFT,
+    fontColor,
   }
 
   // ── Shared page properties ────────────────────────────────────────────
@@ -506,8 +550,8 @@ export async function generateDocx(
 
   // ── Section 1: Front matter ───────────────────────────────────────────
 
-  const frontFooter = !isTop ? makePageNumberFooter(pageNumPos, fontFamily, fontSizeHalfPt) : undefined
-  const frontHeader = isTop  ? makePageNumberHeader(pageNumPos, fontFamily, fontSizeHalfPt) : undefined
+  const frontFooter = !isTop ? makePageNumberFooter(pageNumPos, fontFamily, fontSizeHalfPt, fontColor) : undefined
+  const frontHeader = isTop  ? makePageNumberHeader(pageNumPos, fontFamily, fontSizeHalfPt, fontColor) : undefined
 
   const frontChildren = buildFrontMatterChildren(rules, content, defaults)
 
@@ -529,8 +573,8 @@ export async function generateDocx(
 
   // ── Section 2: Main body ──────────────────────────────────────────────
 
-  const mainFooter = !isTop ? makePageNumberFooter(pageNumPos, fontFamily, fontSizeHalfPt) : undefined
-  const mainHeader = isTop  ? makePageNumberHeader(pageNumPos, fontFamily, fontSizeHalfPt) : undefined
+  const mainFooter = !isTop ? makePageNumberFooter(pageNumPos, fontFamily, fontSizeHalfPt, fontColor) : undefined
+  const mainHeader = isTop  ? makePageNumberHeader(pageNumPos, fontFamily, fontSizeHalfPt, fontColor) : undefined
 
   const mainChildren = buildMainBodyChildren(rules, content, defaults)
 

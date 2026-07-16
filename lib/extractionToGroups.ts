@@ -15,6 +15,7 @@
 import {
   PAPER_SIZE_OPTIONS,
   FONT_FAMILY_OPTIONS,
+  FONT_COLOR_OPTIONS,
   PAGE_NUMBER_POSITION_OPTIONS,
   NUMBERING_FORMAT_OPTIONS,
   CHAPTER_TITLE_CASE_OPTIONS,
@@ -58,24 +59,108 @@ export interface FieldGroup {
 }
 
 // ---------------------------------------------------------------------------
-// Default values (used when detected === false)
+// Default values — dipakai ketika AI tidak mendeteksi field (detected: false)
+//
+// PENTING: setiap nilai bukan asal comot. Alasan per-field:
+//
+// paper_size: 'A4'
+//   Standar nasional Indonesia (SNI 8-1992 / ISO 216). Seluruh pedoman TA
+//   perguruan tinggi Indonesia yang diketahui menetapkan A4. Bukan Letter
+//   (standar AS) atau Legal.
+//
+// margin_left_cm: '4', margin_top_cm: '4'
+//   4 cm adalah margin penjilidan yang paling sering muncul di pedoman TA
+//   Indonesia (termasuk Pedoman FTI UNISBANK Bab V: "dari samping kiri: 4 cm,
+//   dari atas: 4 cm"). Lebih lebar dari margin kanan/bawah karena sisi kiri
+//   dipakai untuk jilid hardcover — jika terlalu sempit, teks terpotong.
+//
+// margin_right_cm: '3', margin_bottom_cm: '3'
+//   3 cm adalah nilai yang konsisten muncul di pedoman TA Indonesia untuk sisi
+//   non-jilid (Pedoman FTI UNISBANK: "kanan 3 cm, bawah 3 cm"). Bukan 2,5 cm
+//   (terlalu sempit untuk cetakan laser) dan bukan 4 cm (pemborosan halaman).
+//
+// font_family: 'Times New Roman'
+//   Font serif paling umum diwajibkan di pedoman TA Indonesia. Muncul eksplisit
+//   di Pedoman FTI UNISBANK Bab V ("huruf Times New Roman"). Bukan Calibri
+//   (default Word modern, tapi jarang diwajibkan di TA Indonesia) dan bukan
+//   Arial (sans-serif, tidak lazim untuk naskah akademik formal).
+//
+// font_size: '12'
+//   12 pt adalah ukuran standar Times New Roman untuk naskah akademik Indonesia.
+//   Muncul di Pedoman FTI UNISBANK (tersirat dari konteks "2 spasi Times New
+//   Roman") dan konsisten dengan konvensi penerbitan akademik internasional
+//   untuk font serif 12pt. BUKAN meniru default Microsoft Word (yang
+//   defaultnya Calibri 11pt — font dan ukuran berbeda, bukan acuan yang tepat
+//   untuk naskah ilmiah Indonesia).
+//
+// line_spacing: '2'
+//   Spasi ganda (2) adalah standar de facto naskah TA/skripsi Indonesia.
+//   Pedoman FTI UNISBANK Bab V secara eksplisit: "jarak pengetikan 2 spasi".
+//   Bukan 1 (terlalu rapat untuk koreksi dosen) dan bukan 1,5 (beberapa
+//   pedoman memakainya, tapi 2 lebih umum di konteks Indonesia).
+//
+// font_color: 'black'
+//   Hitam adalah satu-satunya warna yang diizinkan untuk naskah TA cetak.
+//   Pedoman FTI UNISBANK Bab V secara eksplisit: "Warna tinta hitam".
+//   Bukan default aksidental — ini persyaratan cetak yang hampir universal
+//   di perguruan tinggi Indonesia.
+//
+// page_number_position: 'bottom-center'
+//   Posisi paling umum untuk nomor halaman bagian utama di pedoman TA
+//   Indonesia. Pedoman FTI UNISBANK: "di bawah tengah (1,5 cm dari bawah)".
+//   Bukan top-right (konvensi jurnal/artikel, bukan skripsi) dan bukan
+//   bottom-right (lebih jarang, meski ada beberapa pedoman yang memakainya).
+//
+// front_matter_numbering: 'lowercase-roman'
+//   Romawi kecil (i, ii, iii) adalah konvensi baku untuk bagian awal
+//   (halaman judul s.d. daftar lampiran) di hampir seluruh pedoman TA
+//   Indonesia. Pedoman FTI UNISBANK: "angka romawi huruf kecil (i, ii, ...)".
+//   Bukan angka Arab (yang dipakai bagian utama) dan bukan romawi besar.
+//
+// main_body_numbering: 'arabic'
+//   Angka Arab (1, 2, 3) untuk bagian utama adalah standar universal.
+//   Pedoman FTI UNISBANK: "nomor halaman bab dan sub bab menggunakan angka
+//   Arab (1, 2, ...)".
+//
+// chapter_title_case: 'uppercase'
+//   Judul bab seluruh huruf kapital adalah konvensi paling umum di pedoman
+//   TA Indonesia. Pedoman FTI UNISBANK: "setiap bab dan sub bab diketik
+//   dengan huruf kapital semua". Bukan capitalize (konvensi judul Inggris)
+//   dan bukan normal (terlalu informal untuk judul bab).
+//
+// chapter_title_align: 'center'
+//   Judul bab rata tengah adalah konvensi yang hampir universal di pedoman
+//   TA Indonesia. Cocok dengan tampilan formal skripsi cetak. Bukan rata
+//   kiri (konvensi laporan teknis/jurnal).
+//
+// chapter_number_format: 'roman'
+//   Nomor bab angka Romawi (BAB I, BAB II) adalah konvensi TA Indonesia
+//   paling umum. Pedoman FTI UNISBANK: "nomor urut bab menggunakan Angka
+//   Romawi". Bukan angka Arab (lebih umum di buku teks dan tesis luar negeri).
+//
+// subchapter_number_format: 'decimal'
+//   Format desimal (1.1, 1.2, 2.1) adalah konvensi paling umum untuk
+//   sub-bab di pedoman TA Indonesia. Pedoman FTI UNISBANK: "nomor urut
+//   sub bab menggunakan Angka Arab dengan cara desimal". Bukan romawi
+//   (terlalu berjenjang) dan bukan none (tidak ada penomoran sama sekali).
 // ---------------------------------------------------------------------------
 
 const DEFAULTS: Record<string, string> = {
-  paper_size: 'A4',
-  margin_left_cm: '4',
-  margin_right_cm: '3',
-  margin_top_cm: '4',
-  margin_bottom_cm: '3',
-  font_family: 'Times New Roman',
-  font_size: '12',
-  line_spacing: '2',
-  page_number_position: 'bottom-center',
-  front_matter_numbering: 'lowercase-roman',
-  main_body_numbering: 'arabic',
-  chapter_title_case: 'uppercase',
-  chapter_title_align: 'center',
-  chapter_number_format: 'roman',
+  paper_size:              'A4',
+  margin_left_cm:          '4',
+  margin_right_cm:         '3',
+  margin_top_cm:           '4',
+  margin_bottom_cm:        '3',
+  font_family:             'Times New Roman',
+  font_size:               '12',
+  line_spacing:            '2',
+  font_color:              'black',
+  page_number_position:    'bottom-center',
+  front_matter_numbering:  'lowercase-roman',
+  main_body_numbering:     'arabic',
+  chapter_title_case:      'uppercase',
+  chapter_title_align:     'center',
+  chapter_number_format:   'roman',
   subchapter_number_format: 'decimal',
 }
 
@@ -191,6 +276,14 @@ export function extractionToGroups(result: GeminiExtractionResult): FieldGroup[]
           ...LINE_SPACING_RANGE,
           hint: '1–3',
           ...resolveField(r.line_spacing, DEFAULTS.line_spacing),
+        },
+        {
+          key: 'font_color',
+          label: 'Warna tinta',
+          type: 'select',
+          options: FONT_COLOR_OPTIONS,
+          hint: 'Hampir semua pedoman TA mewajibkan hitam',
+          ...resolveField(r.font_color, DEFAULTS.font_color),
         },
       ],
     },

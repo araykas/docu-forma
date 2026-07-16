@@ -99,6 +99,33 @@ export const SUBCHAPTER_NUMBER_FORMAT_OPTIONS = [
 export type SubchapterNumberFormat = (typeof SUBCHAPTER_NUMBER_FORMAT_OPTIONS)[number]
 
 // ---------------------------------------------------------------------------
+// Font color (field ke-16)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whitelist warna font yang diizinkan.
+ * Hampir semua pedoman TA mewajibkan tinta hitam — default "black".
+ * Nilai disimpan sebagai nama CSS / hex 6-digit tanpa '#'.
+ */
+export const FONT_COLOR_OPTIONS = [
+  'black',
+  'white',
+  'red',
+  'blue',
+  'green',
+] as const
+export type FontColor = (typeof FONT_COLOR_OPTIONS)[number]
+
+/** Peta nama warna → hex OOXML (tanpa '#', 6 digit). */
+export const FONT_COLOR_HEX: Record<FontColor, string> = {
+  black: '000000',
+  white: 'FFFFFF',
+  red:   'FF0000',
+  blue:  '0000FF',
+  green: '008000',
+}
+
+// ---------------------------------------------------------------------------
 // Human-readable labels for select options
 // ---------------------------------------------------------------------------
 
@@ -136,4 +163,11 @@ export const OPTION_LABELS: Record<string, string> = {
   roman:   'Romawi (I, II, III)',
   decimal: 'Desimal (1.1, 1.2)',
   none:    'Tanpa nomor',
+
+  // Font color
+  black: 'Hitam (wajib)',
+  white: 'Putih',
+  red:   'Merah',
+  blue:  'Biru',
+  green: 'Hijau',
 }

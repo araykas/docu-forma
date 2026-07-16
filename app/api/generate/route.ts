@@ -140,6 +140,9 @@ const PAGE_NUMBER_POSITION_WHITELIST = [
 ]
 const NUMBERING_FORMAT_WHITELIST = ['lowercase-roman', 'uppercase-roman', 'arabic']
 
+// Field ke-16: font_color
+const FONT_COLOR_WHITELIST = ['black', 'white', 'red', 'blue', 'green']
+
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
   const n = Number(value)
   if (isNaN(n)) return fallback
@@ -171,6 +174,9 @@ function validateRules(raw: Record<string, unknown>): DocFormatRules {
 
     // Spasi baris: 1–3
     line_spacing: clampNumber(raw.line_spacing, 1, 3, 2),
+
+    // Warna tinta — default 'black' (hitam) sesuai pedoman akademik
+    font_color: whitelistString(raw.font_color, FONT_COLOR_WHITELIST, 'black'),
 
     // Enum fields
     chapter_title_case:       whitelistString(raw.chapter_title_case,       CHAPTER_TITLE_CASE_WHITELIST,       'uppercase'),

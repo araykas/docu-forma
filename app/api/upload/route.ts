@@ -113,24 +113,23 @@ export async function POST(request: NextRequest) {
       console.log(extraction.text.slice(0, 500))
       console.log('=== [DIAG] end pdf text preview ===')
 
-      // [DIAG] Print FULL prompts being sent to Gemini
+      // [DIAG] Print FULL prompts being sent to AI
       // (system prompt is defined in callGemini.ts — see SYSTEM_PROMPT constant)
       const userPromptPdf = `Berikut adalah teks dokumen pedoman penulisan. Ekstrak aturan formatnya:\n\n${extraction.text}`
-      console.log('=== [DIAG] USER PROMPT sent to Gemini (pdf) ===')
+      console.log('=== [DIAG] USER PROMPT sent to AI (pdf) ===')
       console.log(userPromptPdf)
       console.log('=== [DIAG] end user prompt (pdf) ===')
 
       // Spec D2/D3: send extracted text to Gemini for rule extraction
       const geminiResult = await callGemini(extraction.text)
 
-      // [DIAG] Log raw Gemini result BEFORE any D4 validation
-      console.log('=== [DIAG] Gemini raw result (pdf, pre-D4) ===')
+      // [DIAG] Log raw AI result (post-D4 validation, applied inside callGemini)
+      console.log('=== [DIAG] AI raw result (pdf, post-D4) ===')
       console.log(JSON.stringify(geminiResult, null, 2))
-      console.log('=== [DIAG] end Gemini raw result (pdf) ===')
+      console.log('=== [DIAG] end AI raw result (pdf) ===')
 
-      // If Gemini returned an error, surface it to the client
+      // If all providers returned an error, surface it to the client
       if ('type' in geminiResult) {
-        // missing_key = server misconfiguration, not a transient AI issue
         const status = geminiResult.code === 'missing_key' ? 500 : 502
         return Response.json({ ok: false, error: geminiResult.error }, { status })
       }
@@ -178,24 +177,21 @@ export async function POST(request: NextRequest) {
       // mammoth-only extraction, no docx property enrichment yet.
       console.log('[DIAG] NOTE: Spec C2 XML property fallback is NOT active in this test run.')
 
-      // [DIAG] Print full user prompt being sent to Gemini for docx
-      // (system prompt is identical to pdf — defined as SYSTEM_PROMPT in callGemini.ts)
+      // [DIAG] Print full user prompt being sent to AI for docx
       const userPromptDocx = `Berikut adalah teks dokumen pedoman penulisan. Ekstrak aturan formatnya:\n\n${extraction.text}`
-      console.log('=== [DIAG] USER PROMPT sent to Gemini (docx) ===')
+      console.log('=== [DIAG] USER PROMPT sent to AI (docx) ===')
       console.log(userPromptDocx)
       console.log('=== [DIAG] end user prompt (docx) ===')
 
       // Spec D2/D3: send extracted text to Gemini for rule extraction
-      // NOTE: callGemini is called identically for both pdf and docx — no branching.
       const geminiResult = await callGemini(extraction.text)
 
-      // [DIAG] Log raw Gemini result BEFORE any D4 validation
-      console.log('=== [DIAG] Gemini raw result (docx, pre-D4) ===')
+      // [DIAG] Log raw AI result (post-D4 validation, applied inside callGemini)
+      console.log('=== [DIAG] AI raw result (docx, post-D4) ===')
       console.log(JSON.stringify(geminiResult, null, 2))
-      console.log('=== [DIAG] end Gemini raw result (docx) ===')
+      console.log('=== [DIAG] end AI raw result (docx) ===')
 
       if ('type' in geminiResult) {
-        // missing_key = server misconfiguration, not a transient AI issue
         const status = geminiResult.code === 'missing_key' ? 500 : 502
         return Response.json({ ok: false, error: geminiResult.error }, { status })
       }

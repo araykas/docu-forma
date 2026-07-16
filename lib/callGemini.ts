@@ -6,21 +6,22 @@
  * PRD v6, Bagian 3.3 (catatan scoping ekstraksi) & Bagian 3.4 (skema JSON output)
  *           & Bagian 10 poin 4.
  *
- * Mengirim teks polos (dari PDF maupun .docx) ke Gemini Flash dan
- * meminta balikan JSON terstruktur sesuai skema Bagian 3.4.
+ * Mendukung multi-key rotation (opsi 2 — fallback sequential):
+ *   Baca GEMINI_API_KEY_1 … GEMINI_API_KEY_5 dari env.
+ *   Coba key pertama. Kalau kena error sementara (429, 503, 401, 403),
+ *   langsung skip ke key berikutnya tanpa retry ke key yang sama.
+ *   Kalau semua key habis → kembalikan error ke caller.
  *
- * D3 menambahkan instruksi scoping eksplisit di SYSTEM_PROMPT:
- * AI hanya boleh mengekstrak aturan dari bagian Laporan/Skripsi/TA utama,
- * mengabaikan aturan Naskah Publikasi/Jurnal/Lampiran meski ada di dokumen
- * yang sama. Field tidak tersebut di bagian relevan → detected: false,
- * walau angka mirip muncul di bagian lain.
- *
- * Validasi rentang nilai dikerjakan di Spec D4.
+ * Validasi enum post-processing (Spec D4) dijalankan di dalam callGemini
+ * sebelum hasil dikembalikan ke caller.
  */
 
 // ---------------------------------------------------------------------------
 // Tipe: skema JSON yang diharapkan dari Gemini (sesuai PRD Bagian 3.4)
 // ---------------------------------------------------------------------------
+
+// Import Spec D4 validator — dijalankan di dalam callGemini sebelum return
+import { validateAndCorrectExtraction } from '@/lib/validateExtraction'
 
 export interface RuleField {
   value: string | number | boolean | null
@@ -44,6 +45,7 @@ export interface ExtractionRules {
   font_family: RuleField
   font_size: RuleField
   line_spacing: RuleField
+  font_color: RuleField
   page_number_position: RuleField
   front_matter_numbering: RuleField
   main_body_numbering: RuleField
@@ -116,6 +118,7 @@ The JSON must match this exact schema:
     "font_family":             { "value": string|null,  "detected": boolean, "source_quote": string|null },
     "font_size":               { "value": number|null,  "detected": boolean, "source_quote": string|null },
     "line_spacing":            { "value": number|null,  "detected": boolean, "source_quote": string|null },
+    "font_color":              { "value": string|null,  "detected": boolean, "source_quote": string|null },
     "page_number_position":    { "value": string|null,  "detected": boolean, "source_quote": string|null },
     "front_matter_numbering":  { "value": string|null,  "detected": boolean, "source_quote": string|null },
     "main_body_numbering":     { "value": string|null,  "detected": boolean, "source_quote": string|null },
@@ -126,6 +129,17 @@ The JSON must match this exact schema:
   },
   "missing_fields": [array of field names where detected is false]
 }
+
+== FONT COLOR FIELD ==
+The "font_color" field refers to the ink/text color mandated for the main body text of the
+thesis/final-report (NOT headings, NOT cover page decoration).
+- If the document explicitly states the ink/text color (e.g. "tinta hitam", "warna tinta hitam",
+  "black ink"), set "detected": true and "value" to one of: "black", "white", "red", "blue",
+  "green".
+- Map "hitam" / "tinta hitam" / "black" → "black".
+- If the document does NOT explicitly state an ink/text color, set "detected": false,
+  "value": null. The default "black" will be applied automatically by the system.
+- This is separate from cover color (sampul), which is irrelevant here.
 
 == SOURCE QUOTE RULE (MANDATORY) ==
 For EVERY field where "detected": true, you MUST also fill "source_quote" with a verbatim
@@ -199,7 +213,66 @@ main-report section. Do NOT use values from irrelevant sections under any circum
   stated in the main-report section identified above. Otherwise set "detected": false and
   "value": null.
 - "missing_fields" must list every key in "rules" where "detected" is false.
-- All "source" fields must be omitted (they are added server-side, not by you).`
+- All "source" fields must be omitted (they are added server-side, not by you).
+
+== VALUE–QUOTE CONSISTENCY RULE (CRITICAL — fixes a known AI error pattern) ==
+This rule exists because AI models are known to write source_quote and value
+INDEPENDENTLY, causing them to contradict each other. You MUST NOT do this.
+
+MANDATORY two-step procedure for every detected enum field:
+
+  STEP 1 — Write source_quote first.
+    Copy the exact verbatim phrase from the document that states the rule.
+    Example: "nomor halaman bab dan sub bab menggunakan angka Arab"
+
+  STEP 2 — Derive value FROM that quote, not from memory or assumption.
+    Re-read the quote you just wrote. Ask yourself:
+    "What value does THIS EXACT QUOTE describe?"
+    Then write value based solely on the answer to that question.
+
+ENUM MAPPING — apply these mappings when deriving value from source_quote:
+
+  front_matter_numbering / main_body_numbering:
+    quote contains "angka arab" / "arab" / "arabic" / "1, 2, 3"  → value: "arabic"
+    quote contains "romawi kecil" / "huruf kecil" / "i, ii, iii"  → value: "lowercase-roman"
+    quote contains "romawi besar" / "huruf besar" / "I, II, III"  → value: "uppercase-roman"
+
+  chapter_number_format:
+    quote contains "angka romawi" / "romawi" / "I, II, III"       → value: "roman"
+    quote contains "angka arab" / "arab" / "1, 2, 3"              → value: "arabic"
+    quote contains "tanpa nomor" / "tidak bernomor"               → value: "none"
+
+  subchapter_number_format:
+    quote contains "desimal" / "1.1" / "2.1"                      → value: "decimal"
+    quote contains "romawi"                                        → value: "roman"
+    quote contains "angka arab" / "arab" (without decimal context) → value: "arabic"
+
+  chapter_title_case:
+    quote contains "kapital" / "huruf besar" / "uppercase"        → value: "uppercase"
+    quote contains "kapital tiap kata" / "title case"             → value: "capitalize"
+    (no explicit case mentioned)                                   → value: "normal"
+
+  chapter_title_align:
+    quote contains "tengah" / "center"                            → value: "center"
+    quote contains "kiri" / "left"                                → value: "left"
+    quote contains "kanan" / "right"                              → value: "right"
+    quote contains "rata kiri-kanan" / "justify"                  → value: "justify"
+
+EXAMPLE OF THE BUG YOU MUST AVOID:
+  WRONG (value and quote contradict each other — this is the exact bug to prevent):
+    "main_body_numbering": {
+      "value": "lowercase-roman",           ← WRONG: quote says Arab, not Roman
+      "source_quote": "nomor halaman bab dan sub bab menggunakan angka Arab"
+    }
+
+  CORRECT (value derived from re-reading the quote):
+    "main_body_numbering": {
+      "value": "arabic",                    ← correct: quote says "angka Arab" → arabic
+      "source_quote": "nomor halaman bab dan sub bab menggunakan angka Arab"
+    }
+
+If you are uncertain which value the quote maps to, set detected: false rather than
+guessing. A missed detection is always safer than a wrong value.`
 
 // ---------------------------------------------------------------------------
 // Gemini REST endpoint helpers
@@ -213,27 +286,69 @@ function buildGeminiUrl(apiKey: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-key loader
+// ---------------------------------------------------------------------------
+
+/**
+ * Baca semua API key Gemini dari environment variables.
+ *
+ * Urutan prioritas:
+ *   1. GEMINI_API_KEY_1 … GEMINI_API_KEY_5  (multi-key, dipakai kalau ada)
+ *   2. GEMINI_API_KEY                        (single-key legacy, fallback)
+ *
+ * Hasil: array key yang tersedia (kosong jika tidak ada sama sekali).
+ * Key duplikat dan string kosong dibuang.
+ */
+function loadApiKeys(): string[] {
+  const keys: string[] = []
+
+  // Slot bernomor (1–5)
+  for (let i = 1; i <= 5; i++) {
+    const k = process.env[`GEMINI_API_KEY_${i}`]
+    if (k && k.trim()) keys.push(k.trim())
+  }
+
+  // Fallback ke key tunggal kalau tidak ada key bernomor
+  if (keys.length === 0) {
+    const k = process.env.GEMINI_API_KEY
+    if (k && k.trim()) keys.push(k.trim())
+  }
+
+  return keys
+}
+
+/**
+ * HTTP status code yang dianggap "sementara" dan layak di-skip ke key berikutnya.
+ * 401/403 dimasukkan karena bisa berarti key kadaluarsa/quota habis di key itu,
+ * bukan berarti semua key bermasalah.
+ */
+const SKIP_TO_NEXT_KEY_STATUSES = new Set([401, 403, 429, 500, 503])
+
+// ---------------------------------------------------------------------------
 // Main function
 // ---------------------------------------------------------------------------
 
 /**
  * Kirim `text` ke Gemini API dan parse hasilnya sebagai GeminiExtractionResult.
  *
- * @param text  Teks polos hasil ekstraksi PDF atau .docx (dari Spec D1 / C1).
- *              Tidak ada batasan panjang di spec ini — Spec D3+ yang menangani
- *              truncation atau chunking jika diperlukan.
+ * Mencoba setiap API key yang tersedia secara berurutan (opsi 2 — fallback
+ * sequential). Kalau key aktif mengembalikan status yang ada di
+ * SKIP_TO_NEXT_KEY_STATUSES, langsung pindah ke key berikutnya.
  *
+ * Setelah berhasil, hasil divalidasi oleh validateAndCorrectExtraction (Spec D4)
+ * sebelum dikembalikan ke caller.
+ *
+ * @param text  Teks polos hasil ekstraksi PDF atau .docx.
  * @returns  GeminiExtractionResult jika berhasil,
- *           atau GeminiCallError jika API error atau JSON tidak bisa di-parse.
+ *           atau GeminiCallError jika semua key gagal atau terjadi error lain.
  */
 export async function callGemini(
   text: string,
 ): Promise<GeminiExtractionResult | GeminiCallError> {
-  // Pastikan API key tersedia
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    // Log detail teknis ke server — JANGAN kirim ke client
-    console.error('[callGemini] GEMINI_API_KEY tidak ditemukan di environment variables.')
+  const keys = loadApiKeys()
+
+  if (keys.length === 0) {
+    console.error('[callGemini] Tidak ada GEMINI_API_KEY yang tersedia di environment variables.')
     return {
       type: 'error',
       code: 'missing_key',
@@ -241,7 +356,9 @@ export async function callGemini(
     }
   }
 
-  // Bangun request body sesuai Gemini REST API v1beta
+  console.log(`[callGemini] ${keys.length} API key tersedia. Mencoba key-1…`)
+
+  // Bangun request body — sama untuk semua key, hanya URL yang berbeda
   const requestBody = {
     system_instruction: {
       parts: [{ text: SYSTEM_PROMPT }],
@@ -257,97 +374,96 @@ export async function callGemini(
       },
     ],
     generationConfig: {
-      // Minta Gemini menghasilkan JSON langsung
       responseMimeType: 'application/json',
-      temperature: 0.1,  // rendah untuk konsistensi ekstraksi
+      temperature: 0.1,
     },
   }
 
-  let response: Response
-  try {
-    response = await fetch(buildGeminiUrl(apiKey), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    })
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Network error'
-    // Log detail teknis ke server — JANGAN kirim ke client (PRD §6 Skenario 6)
-    console.error('[callGemini] fetch error (network):', message)
-    return {
-      type: 'error',
-      code: 'api_error',
-      error: AI_UNAVAILABLE_MSG,
+  let lastError: GeminiCallError | null = null
+
+  for (let i = 0; i < keys.length; i++) {
+    const apiKey = keys[i]
+    const keyLabel = `key-${i + 1}`
+
+    let response: Response
+    try {
+      response = await fetch(buildGeminiUrl(apiKey), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Network error'
+      console.error(`[callGemini] ${keyLabel} fetch error (network):`, message)
+      lastError = { type: 'error', code: 'api_error', error: AI_UNAVAILABLE_MSG }
+      // Network error pada key ini — coba key berikutnya
+      continue
     }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '(no body)')
+      console.error(`[callGemini] ${keyLabel} HTTP ${response.status} ${response.statusText} — body:`, body)
+
+      lastError = { type: 'error', code: 'api_error', error: AI_UNAVAILABLE_MSG }
+
+      if (SKIP_TO_NEXT_KEY_STATUSES.has(response.status)) {
+        console.warn(`[callGemini] ${keyLabel} status ${response.status} — skip ke key berikutnya.`)
+        continue
+      }
+
+      // Status lain (misal 400 bad request) — masalah bukan di key, tidak perlu coba key lain
+      console.error(`[callGemini] ${keyLabel} status ${response.status} bukan transient — berhenti.`)
+      return lastError
+    }
+
+    // Parse envelope
+    let envelope: unknown
+    try {
+      envelope = await response.json()
+    } catch {
+      console.error(`[callGemini] ${keyLabel} gagal parse envelope sebagai JSON`)
+      lastError = { type: 'error', code: 'parse_error', error: AI_UNAVAILABLE_MSG }
+      continue
+    }
+
+    const rawText = extractTextFromEnvelope(envelope)
+    if (rawText === null) {
+      console.error(`[callGemini] ${keyLabel} struktur envelope tidak terduga:`, JSON.stringify(envelope).slice(0, 300))
+      lastError = { type: 'error', code: 'parse_error', error: AI_UNAVAILABLE_MSG }
+      continue
+    }
+
+    let parsed: unknown
+    try {
+      const cleaned = rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '')
+      parsed = JSON.parse(cleaned)
+    } catch {
+      console.error(`[callGemini] ${keyLabel} JSON parse failed. Raw text:`, rawText.slice(0, 500))
+      lastError = { type: 'error', code: 'parse_error', error: AI_UNAVAILABLE_MSG }
+      continue
+    }
+
+    // Berhasil — tag source, validasi D4, kembalikan
+    const tagged = tagAiSource(parsed as GeminiExtractionResult)
+
+    console.log(`[callGemini] ${keyLabel} berhasil. is_relevant:`, tagged.is_relevant,
+      '| missing_fields:', tagged.missing_fields)
+
+    const rulesMap = tagged.rules as unknown as Record<string, RuleField>
+    for (const [key, field] of Object.entries(rulesMap)) {
+      if (field?.detected) {
+        console.log(`[callGemini] source_quote [${key}]:`, field.source_quote ?? '(kosong)')
+      }
+    }
+
+    // Spec D4: validasi dan auto-koreksi enum sebelum dikembalikan ke caller
+    const { result } = validateAndCorrectExtraction(tagged)
+    return result
   }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '(no body)')
-    // Log detail teknis ke server — JANGAN kirim ke client (PRD §6 Skenario 6)
-    console.error(`[callGemini] HTTP ${response.status}:`, body)
-    return {
-      type: 'error',
-      code: 'api_error',
-      error: AI_UNAVAILABLE_MSG,
-    }
-  }
-
-  // Parse response envelope
-  let envelope: unknown
-  try {
-    envelope = await response.json()
-  } catch {
-    // Log detail teknis ke server — JANGAN kirim ke client (PRD §6 Skenario 6)
-    console.error('[callGemini] Failed to parse Gemini envelope as JSON')
-    return {
-      type: 'error',
-      code: 'parse_error',
-      error: AI_UNAVAILABLE_MSG,
-    }
-  }
-
-  // Ekstrak teks kandidat dari envelope Gemini
-  const rawText = extractTextFromEnvelope(envelope)
-  if (rawText === null) {
-    console.error('[callGemini] Unexpected envelope structure:', JSON.stringify(envelope).slice(0, 300))
-    return {
-      type: 'error',
-      code: 'parse_error',
-      error: AI_UNAVAILABLE_MSG,
-    }
-  }
-
-  // Parse JSON hasil ekstraksi
-  let parsed: unknown
-  try {
-    // Gemini kadang membungkus JSON dengan backtick fences meski sudah
-    // diminta responseMimeType json — bersihkan kalau ada.
-    const cleaned = rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '')
-    parsed = JSON.parse(cleaned)
-  } catch {
-    console.error('[callGemini] JSON parse failed. Raw text:', rawText.slice(0, 500))
-    return {
-      type: 'error',
-      code: 'parse_error',
-      error: AI_UNAVAILABLE_MSG,
-    }
-  }
-
-  // Tag semua field yang terdeteksi dengan source: 'ai_extraction'
-  const result = tagAiSource(parsed as GeminiExtractionResult)
-
-  console.log('[callGemini] Berhasil. is_relevant:', result.is_relevant,
-    '| missing_fields:', result.missing_fields)
-
-  // Log source_quote per field untuk verifikasi (Spec D3+)
-  const rulesMap = result.rules as unknown as Record<string, RuleField>
-  for (const [key, field] of Object.entries(rulesMap)) {
-    if (field?.detected) {
-      console.log(`[callGemini] source_quote [${key}]:`, field.source_quote ?? '(kosong)')
-    }
-  }
-
-  return result
+  // Semua key gagal
+  console.error(`[callGemini] Semua ${keys.length} key gagal.`)
+  return lastError ?? { type: 'error', code: 'api_error', error: AI_UNAVAILABLE_MSG }
 }
 
 // ---------------------------------------------------------------------------

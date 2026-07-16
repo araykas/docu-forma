@@ -8,19 +8,15 @@
  * PRD v6, Bagian 3.4 (skema JSON) & Bagian 10 poin 4.
  *
  * Menerima teks polos yang sudah diekstrak (dari PDF via Spec D1,
- * atau dari .docx via Spec C1), mengirimnya ke Gemini API, dan
- * mengembalikan JSON terstruktur sesuai skema Bagian 3.4.
- *
- * Fokus spec ini: memastikan komunikasi ke Gemini berjalan dan JSON
- * berhasil di-parse, dengan scoping prompt yang sudah diperkuat (D3).
- * Validasi rentang nilai (D4) ditangani di spec berikutnya.
+ * atau dari .docx via Spec C1), mengirimnya ke Gemini, dan mengembalikan
+ * JSON terstruktur sesuai skema Bagian 3.4.
  *
  * Request body (JSON):
- *   { "text": string }          — teks polos hasil ekstraksi
+ *   { "text": string }
  *
  * Response:
- *   { ok: true,  data: GeminiExtractionResult }   — sukses
- *   { ok: false, error: string }                  — gagal
+ *   { ok: true,  data: GeminiExtractionResult }
+ *   { ok: false, error: string }
  */
 
 import { type NextRequest } from 'next/server'
@@ -34,10 +30,9 @@ import { checkRateLimit, extractIp } from '@/lib/rateLimit'
 export const runtime = 'nodejs'
 
 /**
- * maxDuration: batas waktu eksekusi maksimal route ini di Vercel (detik).
- * Vercel free tier (Hobby) membolehkan hingga 60 detik untuk Serverless Functions.
- * Set ke 55 agar ada sedikit buffer sebelum hard-limit platform.
- * PRD Bagian 10 poin 4 & 9: wajib set maxDuration eksplisit di route ini.
+ * maxDuration: Vercel free tier maks 60 detik.
+ * Set ke 55 untuk buffer dari hard-limit platform.
+ * PRD Bagian 10 poin 4 & 9.
  */
 export const maxDuration = 55
 
@@ -47,7 +42,7 @@ export const maxDuration = 55
 
 export async function POST(request: NextRequest) {
   try {
-    // Spec G1: Rate limiting per IP (PRD Bagian 10 poin 5)
+    // Spec G1: Rate limiting per IP
     const ip = extractIp(request.headers)
     if (checkRateLimit(ip)) {
       return Response.json(
@@ -56,7 +51,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Parse JSON body
     let body: unknown
     try {
       body = await request.json()
@@ -67,7 +61,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validasi field "text"
     if (
       typeof body !== 'object' ||
       body === null ||
@@ -88,25 +81,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Panggil Gemini
     const result = await callGemini(text)
 
-    // Tangani error dari callGemini
     if ('type' in result && result.type === 'error') {
       const status = result.code === 'missing_key' ? 500 : 502
       return Response.json({ ok: false, error: result.error }, { status })
     }
 
-    // Sukses — kembalikan data ke client
     return Response.json({ ok: true, data: result })
+
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     console.error('[analyze] unexpected error:', message)
     return Response.json(
-      {
-        ok: false,
-        error: 'Terjadi kesalahan pada server. Silakan coba lagi.',
-      },
+      { ok: false, error: 'Terjadi kesalahan pada server. Silakan coba lagi.' },
       { status: 500 },
     )
   }

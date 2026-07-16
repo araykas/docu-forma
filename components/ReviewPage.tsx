@@ -33,6 +33,7 @@ import { useRouter } from 'next/navigation'
 import {
   PAPER_SIZE_OPTIONS,
   FONT_FAMILY_OPTIONS,
+  FONT_COLOR_OPTIONS,
   PAGE_NUMBER_POSITION_OPTIONS,
   NUMBERING_FORMAT_OPTIONS,
   CHAPTER_TITLE_CASE_OPTIONS,
@@ -172,6 +173,15 @@ const DUMMY_GROUPS: FieldGroup[] = [
         type: 'number',
         ...LINE_SPACING_RANGE,
         hint: '1–3',
+      },
+      {
+        key: 'font_color',
+        label: 'Warna tinta',
+        value: 'black',
+        source: 'default',
+        type: 'select',
+        options: FONT_COLOR_OPTIONS,
+        hint: 'Hampir semua pedoman TA mewajibkan hitam',
       },
     ],
   },
