@@ -1,129 +1,250 @@
 # DocuForma AI
 
-Aplikasi web berbasis Next.js yang mengekstrak aturan format penulisan dari dokumen pedoman Tugas Akhir/Skripsi (PDF atau .docx), lalu menghasilkan template .docx siap pakai dengan aturan tersebut.
+Aplikasi web yang mengotomasi pembuatan template dokumen akademik. Upload dokumen pedoman format kampus (PDF atau DOCX), sistem membaca aturannya sendiri menggunakan AI, lalu hasilkan file template `.docx` siap pakai — tanpa kamu perlu menulis satu instruksi AI pun.
 
 ---
 
-## Stack
+## Masalah yang Diselesaikan
 
-- **Next.js 15** (App Router)
-- **Google Gemini** (ekstraksi aturan via AI)
-- **docx** (generasi file .docx)
-- **Tailwind CSS** (UI)
+Mahasiswa yang hendak menulis Tugas Akhir atau Skripsi harus menyesuaikan dokumen Word mereka secara manual dengan pedoman format kampus — mengatur margin, font, spasi, penomoran halaman, dan format judul bab satu per satu. Proses ini berulang, rawan salah, dan membuang waktu.
 
----
-
-## Cara menjalankan
-
-1. Salin `.env.example` ke `.env.local` dan isi `GEMINI_API_KEY`.
-2. Install dependensi:
-   ```bash
-   npm install
-   ```
-3. Jalankan server development:
-   ```bash
-   npm run dev
-   ```
-4. Buka [http://localhost:3000](http://localhost:3000).
+DocuForma AI mengekstrak semua aturan tersebut secara otomatis dari dokumen pedoman yang sudah ada, lalu menghasilkan template `.docx` yang sudah dikonfigurasi sesuai standar kampus.
 
 ---
 
-## Alur kerja
+## Target Pengguna
 
-```
-Upload PDF/DOCX → Ekstrak teks → Kirim ke Gemini → Ekstrak 16 field aturan
-      → Review & koreksi manual → Download template .docx
-```
+- **Mahasiswa S1/D3/D4** yang sedang atau akan mengerjakan Tugas Akhir/Skripsi
+- Berlaku untuk kampus mana pun yang memiliki dokumen pedoman format penulisan dalam bentuk PDF atau DOCX
 
 ---
 
-## Nilai default field — alasan dan landasan
+## Fitur
 
-Ketika AI tidak mendeteksi sebuah field dari dokumen pedoman (`detected: false`), sistem memakai nilai default. Setiap nilai bukan asal dipilih — berikut landasan per field.
+### Termasuk
+- Upload dokumen pedoman format (PDF atau DOCX, maks. 10 MB)
+- Ekstraksi otomatis 16 aturan format menggunakan Google Gemini AI:
+  - Kertas & margin (ukuran kertas, 4 margin)
+  - Font & spasi (jenis font, ukuran, spasi baris, warna tinta)
+  - Penomoran halaman (posisi, format bagian awal, format bagian utama)
+  - Format judul bab (gaya huruf, perataan, format nomor bab & sub-bab)
+- Halaman review: periksa dan koreksi hasil deteksi AI sebelum generate
+- Badge sumber per field: Terdeteksi AI / Default / Saran file
+- Kutipan verbatim dari dokumen sebagai bukti deteksi
+- Preview A4 real-time yang update saat nilai diubah
+- Download template `.docx` dengan 2 section (bagian awal + bagian utama)
+- Pilihan isi bab: lorem ipsum atau kosong (kerangka saja)
+- Validasi file via magic bytes (bukan ekstensi), deteksi PDF scan & password
+- Rate limiting per IP, timeout request, error handling menyeluruh
 
-> Referensi utama yang dipakai: **Pedoman Penyusunan Tugas Akhir FTI UNISBANK Semarang (2019)**, disingkat *Pedoman FTI* di bawah ini.
-
-### Kertas & Margin
-
-| Field | Default | Alasan |
-|---|---|---|
-| `paper_size` | `A4` | Standar nasional Indonesia (SNI) dan ISO 216. Seluruh pedoman TA perguruan tinggi Indonesia yang diketahui menetapkan A4, bukan Letter (standar AS) atau Legal. |
-| `margin_left_cm` | `4` | Pedoman FTI Bab V secara eksplisit: *"dari samping kiri: 4 cm"*. Lebih lebar karena sisi kiri dipakai untuk jilid hardcover — jika terlalu sempit, teks terpotong setelah dijilid. |
-| `margin_top_cm` | `4` | Pedoman FTI Bab V: *"dari atas: 4 cm"*. Konsisten dengan margin kiri karena keduanya merupakan sisi "primer" tampilan halaman. |
-| `margin_right_cm` | `3` | Pedoman FTI Bab V: *"dari samping kanan: 3 cm"*. Sisi non-jilid, 3 cm cukup untuk cetakan laser tanpa terasa sempit. |
-| `margin_bottom_cm` | `3` | Pedoman FTI Bab V: *"dari bawah: 3 cm"*. Sisi non-jilid, sama dengan margin kanan. |
-
-### Font & Spasi
-
-| Field | Default | Alasan |
-|---|---|---|
-| `font_family` | `Times New Roman` | Font serif paling umum diwajibkan di pedoman TA Indonesia. Pedoman FTI Bab V secara eksplisit: *"Tipe huruf standar (huruf Times New Roman)"*. Bukan Calibri (default Word modern, jarang diwajibkan di TA Indonesia) dan bukan Arial (sans-serif, tidak lazim untuk naskah akademik formal). |
-| `font_size` | `12` | **12 pt adalah konvensi standar Times New Roman untuk naskah akademik Indonesia**, bukan tiruan default Microsoft Word. Word defaultnya Calibri 11pt — font berbeda, ukuran berbeda, bukan acuan yang tepat. 12pt Times New Roman muncul konsisten di konvensi penerbitan akademik Indonesia dan internasional untuk naskah serif formal. Pedoman FTI tidak menyebut angka pt eksplisit, tapi konteks "Times New Roman 2 spasi" di naskah akademik Indonesia selalu merujuk ke 12pt. |
-| `line_spacing` | `2` | Pedoman FTI Bab V secara eksplisit: *"jarak pengetikan 2 spasi"*. Spasi ganda adalah standar de facto naskah TA/skripsi Indonesia — cukup longgar untuk anotasi/koreksi dosen di margin, tidak seperti spasi 1 yang terlalu rapat. |
-| `font_color` | `black` | Pedoman FTI Bab V secara eksplisit: *"Warna tinta hitam"*. Bukan default aksidental — ini persyaratan cetak yang hampir universal di perguruan tinggi Indonesia. |
-
-### Penomoran Halaman
-
-| Field | Default | Alasan |
-|---|---|---|
-| `page_number_position` | `bottom-center` | Pedoman FTI Bab V: *"Peletakan nomor halaman di bawah tengah (1,5 cm dari bawah)"* untuk bagian utama. Posisi paling umum di pedoman TA Indonesia. Bukan top-right (konvensi jurnal/artikel, bukan skripsi). |
-| `front_matter_numbering` | `lowercase-roman` | Romawi kecil (i, ii, iii) adalah konvensi baku untuk bagian awal (halaman judul s.d. daftar lampiran). Pedoman FTI Bab V: *"angka romawi huruf kecil (i, ii, ...)"*. Bukan angka Arab yang dipakai bagian utama. |
-| `main_body_numbering` | `arabic` | Pedoman FTI Bab V: *"nomor halaman bab dan sub bab menggunakan angka Arab (1, 2, ...)"*. Standar universal untuk bagian isi. |
-
-### Format Judul Bab
-
-| Field | Default | Alasan |
-|---|---|---|
-| `chapter_title_case` | `uppercase` | Pedoman FTI Bab V: *"setiap bab dan sub bab diketik dengan huruf kapital semua"*. Konvensi paling umum di pedoman TA Indonesia. Bukan *capitalize* (konvensi judul bahasa Inggris) dan bukan *normal* (terlalu informal). |
-| `chapter_title_align` | `center` | Pedoman FTI Bab V: judul bab diketik *"di tengah halaman"*. Hampir universal di pedoman TA Indonesia. Bukan rata kiri (konvensi laporan teknis/jurnal). |
-| `chapter_number_format` | `roman` | Pedoman FTI Bab V: *"nomor urut bab menggunakan Angka Romawi"* (BAB I, BAB II, ...). Konvensi TA Indonesia paling umum. Bukan angka Arab (lebih umum di buku teks dan tesis luar negeri). |
-| `subchapter_number_format` | `decimal` | Pedoman FTI Bab V: *"nomor urut sub bab menggunakan Angka Arab dengan cara desimal"* (1.1, 1.2, 2.1, ...). Konvensi paling umum di pedoman TA Indonesia untuk sub-bab. |
+### Tidak Termasuk
+- Login / manajemen akun pengguna
+- Penyimpanan dokumen di server (semua diproses in-memory)
+- Dukungan format file selain PDF dan DOCX
+- Dukungan PDF hasil scan/foto (tanpa teks yang bisa diekstrak)
+- Pengeditan template hasil generate secara langsung di browser
 
 ---
 
-## Catatan teknis: kenapa judul bab pernah berwarna biru
+## Prasyarat
 
-Library `docx` menggunakan `HeadingLevel.HEADING_1/2` yang mewarisi style bawaan Word — secara default style tersebut berwarna `#2E74B5` (biru tema Office). Karena `color` pada `TextRun` tidak pernah di-override, Word memperlihatkan warna biru meski dokumennya bukan template Office.
-
-Solusi: setiap `TextRun` di `lib/generateDocx.ts` sekarang selalu menyertakan `color: fontColor` secara eksplisit, di mana `fontColor` berasal dari field `font_color` (default `'000000'` = hitam). Ini berlaku untuk heading level 1, heading level 2, teks isi, teks front matter, dan nomor halaman di footer/header.
-
----
-
-## Struktur proyek
-
-```
-app/
-  page.tsx              # Halaman upload
-  review/page.tsx       # Halaman review aturan
-  api/
-    upload/route.ts     # POST: ekstrak teks + panggil Gemini
-    generate/route.ts   # POST: hasilkan .docx
-    analyze/route.ts    # POST: analisis file
-
-components/
-  FileUpload.tsx        # Komponen upload file
-  ReviewPage.tsx        # Halaman review + form 16 field
-
-lib/
-  callGemini.ts         # Spec D2/D3 — wiring Gemini API + prompt
-  extractionToGroups.ts # Spec E4 — petakan hasil AI ke FieldGroup[]
-  fieldConfig.ts        # Enum options, range, labels, FONT_COLOR_HEX
-  generateDocx.ts       # Spec F1/F2/F3 — generator .docx
-  extractPdfText.ts     # Ekstrak teks dari PDF
-  extractDocxText.ts    # Ekstrak teks dari .docx
-  validateFile.ts       # Validasi tipe & ukuran file
-  rateLimit.ts          # Rate limiting per IP
-
-docs/
-  PRD_DocuForma_AI_v6.md            # Product Requirements Document
-  Kiro_Spec_Breakdown_DocuForma.md  # Breakdown spec per fitur
-  progress.md                       # Log progress implementasi
-```
-
----
-
-## Variabel lingkungan
-
-| Variabel | Keterangan |
+| Kebutuhan | Versi minimum |
 |---|---|
-| `GEMINI_API_KEY` | API key Google Gemini (wajib). Dapatkan di [Google AI Studio](https://aistudio.google.com/). |
+| Node.js | 18.x atau lebih baru |
+| npm | 9.x atau lebih baru |
+| Google Gemini API key | — |
+
+Dapatkan API key Gemini gratis di [Google AI Studio](https://aistudio.google.com/apikey).
+
+---
+
+## Instalasi
+
+**1. Clone repository**
+
+```bash
+git clone <url-repository>
+cd docuforma
+```
+
+**2. Install dependencies**
+
+```bash
+npm install
+```
+
+**3. Buat file environment**
+
+```bash
+cp .env.example .env.local
+```
+
+Buka `.env.local` dan isi nilai `GEMINI_API_KEY_1` dengan API key yang sudah didapat:
+
+```dotenv
+GEMINI_API_KEY_1=AIza...key-kamu-di-sini
+```
+
+---
+
+## Menjalankan Aplikasi
+
+**Development (dengan hot reload)**
+
+```bash
+npm run dev
+```
+
+Buka [http://localhost:3000](http://localhost:3000) di browser.
+
+**Production build**
+
+```bash
+npm run build
+npm run start
+```
+
+---
+
+## Menjalankan Unit Test
+
+Project menggunakan [Jest](https://jestjs.io/) dengan `ts-jest`.
+
+**Jalankan semua test**
+
+```bash
+npm test
+```
+
+**Jalankan dengan laporan coverage**
+
+```bash
+npm run test:coverage
+```
+
+**Jalankan satu file test tertentu**
+
+```bash
+npx jest __tests__/lib/callGemini.test.ts
+```
+
+**Output yang diharapkan**
+
+```
+Test Suites: 10 passed, 10 total
+Tests:       159 passed, 0 failed
+```
+
+Coverage saat ini (semua file di `lib/`):
+
+| Metrik | Coverage |
+|---|---|
+| Statements | ~94% |
+| Branches | ~85% |
+| Functions | ~93% |
+| Lines | ~96% |
+
+---
+
+## Struktur Folder
+
+```
+docuforma/
+├── app/                        # Next.js App Router
+│   ├── page.tsx                # Halaman utama (upload)
+│   ├── layout.tsx              # Root layout
+│   ├── globals.css             # Global styles (Tailwind)
+│   └── api/
+│       ├── upload/route.ts     # POST /api/upload — ekstraksi teks + Gemini
+│       ├── generate/route.ts   # POST /api/generate — generate file .docx
+│       └── analyze/route.ts    # POST /api/analyze — endpoint analisis mandiri
+│
+├── app/review/
+│   └── page.tsx                # Halaman review aturan hasil ekstraksi
+│
+├── components/
+│   ├── FileUpload.tsx          # Komponen upload file (drag & drop, progress)
+│   └── ReviewPage.tsx          # Halaman review + form 16 field + preview A4
+│
+├── lib/                        # Business logic (semua pure functions, testable)
+│   ├── callGemini.ts           # Integrasi Google Gemini API + multi-key rotation
+│   ├── validateExtraction.ts   # Post-processing: koreksi mismatch value vs quote
+│   ├── extractionToGroups.ts   # Mapping hasil AI → FieldGroup[] untuk ReviewPage
+│   ├── fieldConfig.ts          # Konstanta: enum options, range, label UI
+│   ├── generateDocx.ts         # Generator file .docx (margin, font, section, dll.)
+│   ├── extractPdfText.ts       # Ekstraksi teks dari PDF (via unpdf/PDF.js)
+│   ├── extractDocxText.ts      # Ekstraksi teks dari DOCX (via mammoth)
+│   ├── validateFile.ts         # Validasi file: magic bytes, ukuran, zip-bomb
+│   └── rateLimit.ts            # Rate limiter in-memory per IP (sliding window)
+│
+├── __tests__/
+│   └── lib/                    # Unit test untuk semua modul di lib/
+│       ├── callGemini.test.ts
+│       ├── validateExtraction.test.ts
+│       ├── extractionToGroups.test.ts
+│       ├── fieldConfig.test.ts
+│       ├── generateDocx.test.ts
+│       ├── extractPdfText.test.ts
+│       ├── extractDocxText.test.ts
+│       ├── validateFile.test.ts
+│       ├── validateFile.advanced.test.ts
+│       └── rateLimit.test.ts
+│
+├── public/                     # Aset statis
+├── .env.example                # Template environment variables (aman di-commit)
+├── .env.local                  # Nilai environment aktual (JANGAN di-commit)
+├── jest.config.ts              # Konfigurasi Jest
+├── next.config.ts              # Konfigurasi Next.js
+├── package.json
+└── tsconfig.json
+```
+
+---
+
+## Alur Kerja Aplikasi
+
+```
+Upload PDF/DOCX
+      │
+      ▼
+Validasi file (magic bytes, ukuran, password, zip-bomb)
+      │
+      ▼
+Ekstraksi teks (unpdf untuk PDF, mammoth untuk DOCX)
+      │
+      ▼
+Kirim ke Gemini AI → ekstrak 16 aturan format + source_quote
+      │
+      ▼
+Post-processing: koreksi otomatis mismatch value vs source_quote
+      │
+      ▼
+Halaman Review: tampilkan hasil, user bisa koreksi manual
+      │
+      ▼
+Generate file .docx → download
+```
+
+---
+
+## Stack Teknologi
+
+| Layer | Teknologi |
+|---|---|
+| Framework | Next.js 16 (App Router) |
+| AI | Google Gemini 2.5 Flash Lite |
+| Generate DOCX | docx v9 |
+| Ekstraksi PDF | unpdf (PDF.js) |
+| Ekstraksi DOCX | mammoth |
+| Validasi ZIP | jszip |
+| Styling | Tailwind CSS v4 |
+| Testing | Jest + ts-jest |
+| Bahasa | TypeScript |
+
+---
+
+## Catatan
+
+- Dokumen yang diupload diproses sepenuhnya **in-memory** — tidak ada file yang disimpan ke disk atau database.
+- Pada free tier Google Gemini, Google dapat menggunakan data yang dikirim untuk peningkatan model. Jangan upload dokumen yang mengandung data pribadi atau informasi sensitif.
+- Proyek ini dibuat sebagai Tugas UAS Mata Kuliah AI dan bersifat non-komersial.

@@ -30,8 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — jangan commit nilai asli
 .env*
+# tapi .env.example boleh (template tanpa rahasia)
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +41,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# docs (local working notes — bukan untuk dokumentasi produk)
+# /docs/
+
+# editor & IDE config
+.vscode/
+
+# AI agent instruction files (tool-specific, not app code)
+AGENTS.md
+CLAUDE.md
+
+# ad-hoc test scripts
+test-classify.mjs
+
+# kiro specs
+.kiro/
