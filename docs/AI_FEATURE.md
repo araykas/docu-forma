@@ -11,15 +11,15 @@
 | Atribut | Nilai |
 |---|---|
 | Provider | Google Gemini (via REST API) |
-| Model | `gemini-2.5-flash-lite` |
-| Endpoint | `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent` |
+| Model | `gemini-3.1-flash-lite` |
+| Endpoint | `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent` |
 | Autentikasi | API key via query parameter `?key=` |
 | Response format | `application/json` (dikonfigurasi di `generationConfig.responseMimeType`) |
 | Temperature | `0.1` (mendekati deterministik) |
 
 ### Alasan Pemilihan
 
-**Gemini Flash Lite** dipilih dengan pertimbangan:
+**Gemini 3.1 Flash-Lite** dipilih dengan pertimbangan:
 
 - **Kecepatan:** Flash Lite adalah varian yang dioptimasi untuk latensi rendah, penting karena setiap upload menunggu respons AI secara sinkron di satu request HTTP.
 - **Kemampuan JSON mode:** Mendukung `responseMimeType: 'application/json'` sehingga respons dijamin berupa JSON valid tanpa markup tambahan, menghilangkan kebutuhan parsing markdown code fence.
@@ -193,7 +193,7 @@ Sebelum diteruskan ke `generateDocx()`, semua field divalidasi ulang di `app/api
 ```
 Coba key-1
   → Jika HTTP 429 / 503 / 401 / 403 → skip ke key-2
-  → Jika HTTP 400 (bad request) → berhenti, tidak coba key lain
+  → Jika HTTP 400 / 404 (fatal) → berhenti, tidak coba key lain
   → Jika network error → coba key berikutnya
   → Jika berhasil → return hasil
 
@@ -203,7 +203,7 @@ Semua gagal → return GeminiCallError { code: 'api_error' }
 ```
 
 Status yang dianggap "transient per-key" (layak di-skip): `401, 403, 429, 500, 503`.  
-Status yang dianggap "fatal" (berhenti langsung): `400` (bad request — masalah di payload, bukan di key).
+Status yang dianggap "fatal" (berhenti langsung): `400` (bad request — masalah di payload), `404` (model tidak dikenali — mencoba key lain percuma karena masalahnya di nama model, bukan di key).
 
 ### 4.2 Error Types yang Dikembalikan
 

@@ -46,6 +46,30 @@ DocuForma AI mengekstrak semua aturan tersebut secara otomatis dari dokumen pedo
 
 ---
 
+## Dokumentasi Lengkap
+
+| Dokumen | Isi |
+|---|---|
+| [docs/PRD.md](docs/PRD.md) | Requirements produk lengkap, user stories, skenario error |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arsitektur sistem, alur data, keputusan teknis |
+| [docs/AI_FEATURE.md](docs/AI_FEATURE.md) | Detail implementasi AI, prompt design, dan **batasan akurasi** |
+| [docs/API.md](docs/API.md) | Referensi endpoint API lengkap dengan contoh request/response |
+| [docs/USER_FLOW.md](docs/USER_FLOW.md) | Alur pengguna lengkap dari upload hingga download |
+
+---
+
+## Batasan & Akurasi AI
+
+- **16 field yang diekstrak:** kertas & margin (5 field), font & spasi (4 field), penomoran halaman (3 field), format judul bab (4 field). Setiap field bisa terdeteksi atau tidak tergantung kelengkapan dokumen sumber.
+- **Akurasi bervariasi:** Dokumen pedoman yang terstruktur jelas dengan heading eksplisit menghasilkan deteksi yang hampir selalu tepat. Dokumen yang menggunakan gambar/screenshot untuk contoh format, atau tidak memisahkan aturan laporan utama dan naskah publikasi dengan heading yang jelas, bisa menghasilkan deteksi yang kurang akurat.
+- **3 lapis safeguard yang ada:**
+  1. `source_quote` — setiap nilai yang terdeteksi disertai kutipan verbatim dari dokumen sumber; user bisa verifikasi langsung di halaman review
+  2. Auto-koreksi mismatch di `validateExtraction.ts` — mendeteksi dan memperbaiki kontradiksi antara kutipan dan nilai enum yang dikembalikan AI (bug yang diketahui pada LLM)
+  3. Halaman review interaktif — semua 16 field bisa dikoreksi manual sebelum template di-generate
+- Detail lengkap termasuk tabel akurasi per kondisi dokumen dan kasus yang diketahui bisa salah: lihat [docs/AI_FEATURE.md](docs/AI_FEATURE.md).
+
+---
+
 ## Prasyarat
 
 | Kebutuhan | Versi minimum |
@@ -177,6 +201,13 @@ docuforma/
 │   ├── validateFile.ts         # Validasi file: magic bytes, ukuran, zip-bomb
 │   └── rateLimit.ts            # Rate limiter in-memory per IP (sliding window)
 │
+├── docs/                       # Dokumentasi proyek
+│   ├── PRD.md                  # Requirements produk lengkap & user stories
+│   ├── ARCHITECTURE.md         # Arsitektur sistem & keputusan teknis
+│   ├── AI_FEATURE.md           # Detail AI: prompt design, batasan, akurasi
+│   ├── API.md                  # Referensi endpoint API
+│   └── USER_FLOW.md            # Alur pengguna lengkap
+│
 ├── __tests__/
 │   └── lib/                    # Unit test untuk semua modul di lib/
 │       ├── callGemini.test.ts
@@ -232,7 +263,7 @@ Generate file .docx → download
 | Layer | Teknologi |
 |---|---|
 | Framework | Next.js 16 (App Router) |
-| AI | Google Gemini 2.5 Flash Lite |
+| AI | Google Gemini 3.1 Flash-Lite |
 | Generate DOCX | docx v9 |
 | Ekstraksi PDF | unpdf (PDF.js) |
 | Ekstraksi DOCX | mammoth |

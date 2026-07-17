@@ -75,7 +75,7 @@ Agar AI bisa membaca isi pedoman, teks harus diekstrak terlebih dahulu dari form
 
 **Apa yang ada di kode:**
 - Integrasi Google Gemini REST API di `lib/callGemini.ts`
-- Model yang dipakai: `gemini-2.5-flash-lite`
+- Model yang dipakai: `gemini-3.1-flash-lite`
 - Rotasi multi-key: mendukung hingga 5 API key (`GEMINI_API_KEY_1` s.d. `_5`), fallback sequential jika satu key kena rate limit atau error
 - Prompt engineering dengan scoping rule: AI hanya mengekstrak aturan dari bagian laporan/skripsi utama, mengabaikan bagian Naskah Publikasi atau Lampiran yang sering punya aturan berbeda
 - Untuk setiap field yang terdeteksi, AI wajib mengisi `source_quote` — kutipan verbatim dari dokumen yang menjadi dasar deteksi

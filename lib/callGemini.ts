@@ -278,7 +278,7 @@ guessing. A missed detection is always safer than a wrong value.`
 // Gemini REST endpoint helpers
 // ---------------------------------------------------------------------------
 
-const GEMINI_MODEL = 'gemini-2.5-flash-lite'
+const GEMINI_MODEL = 'gemini-3.1-flash-lite'
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 function buildGeminiUrl(apiKey: string): string {
@@ -323,6 +323,16 @@ function loadApiKeys(): string[] {
  * bukan berarti semua key bermasalah.
  */
 const SKIP_TO_NEXT_KEY_STATUSES = new Set([401, 403, 429, 500, 503])
+
+/**
+ * HTTP status code yang dianggap "fatal" dan harus langsung berhenti —
+ * tidak ada gunanya mencoba key lain karena masalahnya bukan di key.
+ *
+ * 400 — bad request: payload atau parameter tidak valid (masalah di request body)
+ * 404 — not found: model tidak dikenali / tidak tersedia untuk akun ini.
+ *        Mencoba key lain percuma karena nama model yang salah, bukan key-nya.
+ */
+const FATAL_STATUSES = new Set([400, 404])
 
 // ---------------------------------------------------------------------------
 // Main function
@@ -411,8 +421,18 @@ export async function callGemini(
         continue
       }
 
-      // Status lain (misal 400 bad request) — masalah bukan di key, tidak perlu coba key lain
-      console.error(`[callGemini] ${keyLabel} status ${response.status} bukan transient — berhenti.`)
+      // Status fatal — masalah bukan di key, tidak perlu coba key lain
+      if (FATAL_STATUSES.has(response.status)) {
+        if (response.status === 404) {
+          console.error(`[callGemini] HTTP 404 — model "${GEMINI_MODEL}" tidak dikenali atau tidak tersedia untuk akun ini. Periksa nama model di GEMINI_MODEL.`)
+        } else {
+          console.error(`[callGemini] ${keyLabel} status ${response.status} (fatal, bad request) — berhenti.`)
+        }
+        return lastError
+      }
+
+      // Status lain yang tidak dikenal — berhenti juga
+      console.error(`[callGemini] ${keyLabel} status ${response.status} tidak dikenal — berhenti.`)
       return lastError
     }
 
