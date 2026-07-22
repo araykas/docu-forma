@@ -1,3 +1,14 @@
+## 🌐 URL Aplikasi
+
+https://docu-forma.vercel.app/
+
+## 👥 Personel
+
+| Nama | NIM |
+|------|-----|
+| Aditya Bagas Prakoso | 24.01.53.0003 |
+| Jonathan Andrean Sutanto | 24.01.53.0007 |
+
 # DocuForma AI
 
 Aplikasi web yang mengotomasi pembuatan template dokumen akademik. Upload dokumen pedoman format kampus (PDF atau DOCX), sistem membaca aturannya sendiri menggunakan AI, lalu hasilkan file template `.docx` siap pakai — tanpa kamu perlu menulis satu instruksi AI pun.
