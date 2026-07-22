@@ -9,6 +9,11 @@ https://docu-forma.vercel.app/
 | Aditya Bagas Prakoso | 24.01.53.0003 |
 | Jonathan Andrean Sutanto | 24.01.53.0007 |
 
+## poster
+
+<img width="3508" height="4961" alt="Poster_DocuForma_A3" src="https://github.com/user-attachments/assets/e4392c9d-6d8a-4a59-a75d-af15e3a188e7" />
+
+
 # DocuForma AI
 
 Aplikasi web yang mengotomasi pembuatan template dokumen akademik. Upload dokumen pedoman format kampus (PDF atau DOCX), sistem membaca aturannya sendiri menggunakan AI, lalu hasilkan file template `.docx` siap pakai — tanpa kamu perlu menulis satu instruksi AI pun.
